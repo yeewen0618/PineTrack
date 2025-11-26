@@ -1,0 +1,249 @@
+import React, { useState } from 'react';
+import { Card } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Avatar, AvatarFallback } from '../components/ui/avatar';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger
+} from '../components/ui/dialog';
+import { mockWorkers, mockPlots, mockTasks } from '../lib/mockData';
+import { Plus, Search, Phone, CheckCircle2 } from 'lucide-react';
+import { toast } from 'sonner@2.0.3';
+
+export function WorkersPage() {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    role: 'Field Worker',
+    contact: ''
+  });
+
+  const filteredWorkers = mockWorkers.filter((worker) =>
+    worker.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleAddWorker = (e: React.FormEvent) => {
+    e.preventDefault();
+    toast.success('Worker added successfully');
+    setIsAddDialogOpen(false);
+    setFormData({ name: '', role: 'Field Worker', contact: '' });
+  };
+
+  const getWorkerInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl text-[#111827] mb-1">Worker Management</h2>
+          <p className="text-[#6B7280]">Manage field workers and task assignments</p>
+        </div>
+
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-[#15803D] hover:bg-[#16A34A] rounded-xl gap-2">
+              <Plus size={20} />
+              Add Worker
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>Add New Worker</DialogTitle>
+              <DialogDescription>Enter worker details and assign to plots</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleAddWorker} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="workerName">Full Name</Label>
+                <Input
+                  id="workerName"
+                  placeholder="e.g., Juan Santos"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="rounded-xl"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="role">Role</Label>
+                <select
+                  id="role"
+                  value={formData.role}
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                  className="w-full h-10 px-3 rounded-xl border border-[#E5E7EB] bg-white text-[#111827] focus:border-[#15803D] focus:ring-[#15803D] focus:outline-none"
+                  required
+                >
+                  <option>Field Worker</option>
+                  <option>Field Supervisor</option>
+                  <option>Soil Specialist</option>
+                  <option>Irrigation Technician</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="contact">Contact Number</Label>
+                <Input
+                  id="contact"
+                  type="tel"
+                  placeholder="+63 912 345 6789"
+                  value={formData.contact}
+                  onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
+                  className="rounded-xl"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 rounded-xl"
+                  onClick={() => setIsAddDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl">
+                  Add Worker
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Summary Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card className="p-5 rounded-2xl bg-white">
+          <p className="text-sm text-[#6B7280] mb-1">Total Workers</p>
+          <p className="text-2xl text-[#111827]">{mockWorkers.length}</p>
+        </Card>
+        <Card className="p-5 rounded-2xl bg-white">
+          <p className="text-sm text-[#6B7280] mb-1">Active Today</p>
+          <p className="text-2xl text-[#111827]">{mockWorkers.length}</p>
+        </Card>
+        <Card className="p-5 rounded-2xl bg-white">
+          <p className="text-sm text-[#6B7280] mb-1">Tasks Completed</p>
+          <p className="text-2xl text-[#111827]">
+            {mockWorkers.reduce((sum, w) => sum + w.tasksCompleted, 0)}
+          </p>
+        </Card>
+        <Card className="p-5 rounded-2xl bg-white">
+          <p className="text-sm text-[#6B7280] mb-1">Avg Performance</p>
+          <p className="text-2xl text-[#111827]">94%</p>
+        </Card>
+      </div>
+
+      {/* Search */}
+      <Card className="p-4 rounded-2xl bg-white">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280]" size={18} />
+          <Input
+            placeholder="Search workers by name..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 rounded-xl border-[#E5E7EB]"
+            aria-label="Search workers"
+          />
+        </div>
+      </Card>
+
+      {/* Workers Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredWorkers.map((worker) => {
+          const workerTasks = mockTasks.filter((task) =>
+            worker.assignedPlots.includes(task.plotId)
+          );
+          const todayTasks = workerTasks.filter((task) => task.date === '2025-11-06');
+
+          return (
+            <Card key={worker.id} className="p-6 rounded-2xl bg-white hover:shadow-lg transition-shadow">
+              {/* Worker Header */}
+              <div className="flex items-start gap-4 mb-4">
+                <Avatar className="w-14 h-14 bg-gradient-to-br from-[#15803D] to-[#16A34A] text-white">
+                  <AvatarFallback className="bg-transparent text-white">
+                    {getWorkerInitials(worker.name)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-[#111827] truncate">{worker.name}</h3>
+                  <p className="text-sm text-[#6B7280]">{worker.role}</p>
+                </div>
+              </div>
+
+              {/* Contact */}
+              <div className="flex items-center gap-2 text-sm text-[#6B7280] mb-4">
+                <Phone size={14} />
+                <span>{worker.contact}</span>
+              </div>
+
+              {/* Stats */}
+              <div className="grid grid-cols-2 gap-4 mb-4 pb-4 border-b border-[#E5E7EB]">
+                <div>
+                  <p className="text-xs text-[#6B7280] mb-1">Assigned Plots</p>
+                  <p className="text-lg text-[#111827]">{worker.assignedPlots.length}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-[#6B7280] mb-1">Tasks Today</p>
+                  <p className="text-lg text-[#111827]">{todayTasks.length}</p>
+                </div>
+              </div>
+
+              {/* Assigned Plots */}
+              <div className="mb-4">
+                <p className="text-xs text-[#6B7280] mb-2">Assigned Plots:</p>
+                <div className="flex flex-wrap gap-2">
+                  {worker.assignedPlots.map((plotId) => {
+                    const plot = mockPlots.find((p) => p.id === plotId);
+                    return plot ? (
+                      <span
+                        key={plotId}
+                        className="px-2 py-1 bg-[#DCFCE7] text-[#15803D] text-xs rounded-lg"
+                      >
+                        {plot.name}
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+
+              {/* Performance */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-[#6B7280]">Tasks Completed</p>
+                  <div className="flex items-center gap-1 text-[#16A34A]">
+                    <CheckCircle2 size={14} />
+                    <span className="text-xs">{worker.tasksCompleted}</span>
+                  </div>
+                </div>
+                <div className="w-full h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-[#15803D] to-[#16A34A] rounded-full"
+                    style={{ width: '94%' }}
+                    role="progressbar"
+                    aria-valuenow={94}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  />
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

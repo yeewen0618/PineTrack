@@ -1,0 +1,425 @@
+import React, { useState } from 'react';
+import { Card } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from '../components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger
+} from '../components/ui/dialog';
+import { StatusBadge } from '../components/StatusBadge';
+import { mockPlots } from '../lib/mockData';
+import { Plus, Search, Edit, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
+
+interface PlotManagementPageProps {
+  onNavigate: (page: string, plotId?: string) => void;
+}
+
+export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [selectedPlot, setSelectedPlot] = useState<any>(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    cropType: 'MD2 Pineapple',
+    area: '',
+    plantingDate: '',
+    growthStage: 'Establishment'
+  });
+
+  const filteredPlots = mockPlots.filter(
+    (plot) =>
+      plot.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      plot.cropType.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleAddPlot = (e: React.FormEvent) => {
+    e.preventDefault();
+    toast.success('Plot added successfully! Schedule auto-generated.');
+    setIsAddDialogOpen(false);
+    setFormData({ name: '', cropType: 'MD2 Pineapple', area: '', plantingDate: '', growthStage: 'Establishment' });
+  };
+
+  const handleEditClick = (plot: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedPlot(plot);
+    setFormData({
+      name: plot.name,
+      cropType: plot.cropType,
+      area: plot.area.toString(),
+      plantingDate: plot.plantingDate,
+      growthStage: plot.growthStage
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleEditPlot = (e: React.FormEvent) => {
+    e.preventDefault();
+    toast.success('Plot updated successfully!');
+    setIsEditDialogOpen(false);
+    setSelectedPlot(null);
+    setFormData({ name: '', cropType: 'MD2 Pineapple', area: '', plantingDate: '', growthStage: 'Establishment' });
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-white via-[#FAFFFE] to-[#EBF8EF] space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-[20px] text-[#111827]">Plot Management</h2>
+          <p className="text-[16px] text-[#374151]">Manage all registered plots</p>
+        </div>
+
+        {/* Add New Plot Dialog */}
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-[#15803D] hover:bg-[#16A34A] rounded-xl gap-2">
+              <Plus size={20} />
+              Add New Plot
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="rounded-[20px] p-8 shadow-[0_8px_20px_rgba(0,0,0,0.15)]">
+            <DialogHeader>
+              <DialogTitle className="text-[20px]">Add New Plot</DialogTitle>
+              <DialogDescription className="text-[14px]">
+                Enter plot details. A 14-month schedule will be auto-generated.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleAddPlot} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="plotName" className="text-[14px]">Plot Name</Label>
+                <Input
+                  id="plotName"
+                  placeholder="e.g., Plot D-1"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="rounded-xl"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="cropType" className="text-[14px]">Crop Type</Label>
+                <select
+                  id="cropType"
+                  value={formData.cropType}
+                  onChange={(e) => setFormData({ ...formData, cropType: e.target.value })}
+                  className="w-full h-10 px-3 rounded-xl border border-[#E5E7EB] bg-white text-[#111827] text-[14px] focus:border-[#15803D] focus:ring-[#15803D] focus:outline-none"
+                  required
+                >
+                  <option>MD2 Pineapple</option>
+                  <option>Queen Pineapple</option>
+                  <option>Smooth Cayenne</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="area" className="text-[14px]">Area (hectares)</Label>
+                <Input
+                  id="area"
+                  type="number"
+                  step="0.1"
+                  placeholder="e.g., 2.5"
+                  value={formData.area}
+                  onChange={(e) => setFormData({ ...formData, area: e.target.value })}
+                  className="rounded-xl"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="plantingDate" className="text-[14px]">Planting Date</Label>
+                <Input
+                  id="plantingDate"
+                  type="date"
+                  value={formData.plantingDate}
+                  onChange={(e) => setFormData({ ...formData, plantingDate: e.target.value })}
+                  className="rounded-xl"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="growthStage" className="text-[14px]">Growth Stage</Label>
+                <select
+                  id="growthStage"
+                  value={formData.growthStage}
+                  onChange={(e) => setFormData({ ...formData, growthStage: e.target.value })}
+                  className="w-full h-10 px-3 rounded-xl border border-[#E5E7EB] bg-white text-[#111827] text-[14px] focus:border-[#15803D] focus:ring-[#15803D] focus:outline-none"
+                  required
+                >
+                  <option>Establishment</option>
+                  <option>Early Growth</option>
+                  <option>Vegetative</option>
+                  <option>Flowering</option>
+                  <option>Fruiting</option>
+                  <option>Mature</option>
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="flex-1 rounded-xl text-[14px]"
+                  onClick={() => setIsAddDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl text-[14px]">
+                  Add Plot
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Plot Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="rounded-[20px] p-8 shadow-[0_8px_20px_rgba(0,0,0,0.15)]">
+            <DialogHeader>
+              <DialogTitle className="text-[20px]">Edit Plot</DialogTitle>
+              <DialogDescription className="text-[14px]">
+                Update plot details below.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleEditPlot} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="editPlotName" className="text-[14px]">Plot Name</Label>
+                <Input
+                  id="editPlotName"
+                  placeholder="e.g., Plot D-1"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="rounded-xl"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editCropType" className="text-[14px]">Crop Type</Label>
+                <select
+                  id="editCropType"
+                  value={formData.cropType}
+                  onChange={(e) => setFormData({ ...formData, cropType: e.target.value })}
+                  className="w-full h-10 px-3 rounded-xl border border-[#E5E7EB] bg-white text-[#111827] text-[14px] focus:border-[#15803D] focus:ring-[#15803D] focus:outline-none"
+                  required
+                >
+                  <option>MD2 Pineapple</option>
+                  <option>Queen Pineapple</option>
+                  <option>Smooth Cayenne</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editArea" className="text-[14px]">Area (hectares)</Label>
+                <Input
+                  id="editArea"
+                  type="number"
+                  step="0.1"
+                  placeholder="e.g., 2.5"
+                  value={formData.area}
+                  onChange={(e) => setFormData({ ...formData, area: e.target.value })}
+                  className="rounded-xl"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editPlantingDate" className="text-[14px]">Planting Date</Label>
+                <Input
+                  id="editPlantingDate"
+                  type="date"
+                  value={formData.plantingDate}
+                  onChange={(e) => setFormData({ ...formData, plantingDate: e.target.value })}
+                  className="rounded-xl"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editGrowthStage" className="text-[14px]">Growth Stage</Label>
+                <select
+                  id="editGrowthStage"
+                  value={formData.growthStage}
+                  onChange={(e) => setFormData({ ...formData, growthStage: e.target.value })}
+                  className="w-full h-10 px-3 rounded-xl border border-[#E5E7EB] bg-white text-[#111827] text-[14px] focus:border-[#15803D] focus:ring-[#15803D] focus:outline-none"
+                  required
+                >
+                  <option>Establishment</option>
+                  <option>Early Growth</option>
+                  <option>Vegetative</option>
+                  <option>Flowering</option>
+                  <option>Fruiting</option>
+                  <option>Mature</option>
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="flex-1 rounded-xl text-[14px]"
+                  onClick={() => setIsEditDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl text-[14px]">
+                  Save Changes
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Search and Filter */}
+      <Card className="p-4 rounded-2xl bg-white shadow-sm">
+        <div className="flex items-center gap-4">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280]" size={18} />
+            <Input
+              placeholder="Search plots by name or crop type..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 rounded-xl border-[#E5E7EB]"
+              aria-label="Search plots"
+            />
+          </div>
+        </div>
+      </Card>
+
+      {/* Plots Table */}
+      <Card className="rounded-2xl bg-white overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-[#F9FAFB] hover:bg-[#F9FAFB] border-b border-[#E5E7EB]">
+                <TableHead className="pl-8 text-[14px]">Plot ID</TableHead>
+                <TableHead className="text-[14px]">Name</TableHead>
+                <TableHead className="text-[14px]">Crop Type</TableHead>
+                <TableHead className="text-[14px]">Area</TableHead>
+                <TableHead className="text-[14px]">Planting Date</TableHead>
+                <TableHead className="text-[14px]">Growth Stage</TableHead>
+                <TableHead className="text-[14px]">Status</TableHead>
+                <TableHead className="text-[14px]">Health</TableHead>
+                <TableHead className="text-right pr-8 text-[14px]">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredPlots.map((plot) => (
+                <TableRow
+                  key={plot.id}
+                  className="cursor-pointer hover:bg-[#F0FDF4] transition-colors border-b border-[#E5E7EB]"
+                  onClick={() => onNavigate('plot-details', plot.id)}
+                >
+                  <TableCell className="pl-8 font-medium text-[14px]">{plot.id}</TableCell>
+                  <TableCell className="text-[14px]">{plot.name}</TableCell>
+                  <TableCell className="text-[14px]">{plot.cropType}</TableCell>
+                  <TableCell className="text-[14px]">{plot.area} ha</TableCell>
+                  <TableCell className="text-[14px]">
+                    {new Date(plot.plantingDate).toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric'
+                    })}
+                  </TableCell>
+                  <TableCell className="text-[14px]">{plot.growthStage}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={plot.status} />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${plot.healthScore >= 80
+                            ? 'bg-[#16A34A]'
+                            : plot.healthScore >= 60
+                              ? 'bg-[#CA8A04]'
+                              : 'bg-[#DC2626]'
+                            }`}
+                          style={{ width: `${plot.healthScore}%` }}
+                          role="progressbar"
+                          aria-valuenow={plot.healthScore}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                        />
+                      </div>
+                      <span className="text-[14px]">{plot.healthScore}%</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right pr-8">
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-lg hover:bg-[#15803D]/10 hover:text-[#15803D] transition-colors"
+                        onClick={(e: React.MouseEvent<HTMLButtonElement>) =>
+                          handleEditClick(plot, e)
+                        }
+                        aria-label={`Edit ${plot.name}`}
+                      >
+                        <Edit size={16} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-lg text-[#DC2626] hover:text-[#991B1B] hover:bg-red-50 transition-colors"
+                        onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                          e.stopPropagation();
+                          toast.error("Delete plot feature");
+                        }}
+                        aria-label={`Delete ${plot.name}`}
+                      >
+                        <Trash2 size={16} />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
+
+      {/* Summary Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+          <p className="text-[14px] text-[#6B7280] mb-1">Total Plots</p>
+          <p className="text-[20px] text-[#111827]">{mockPlots.length}</p>
+        </Card>
+        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+          <p className="text-[14px] text-[#6B7280] mb-1">Total Area</p>
+          <p className="text-[20px] text-[#111827]">
+            {mockPlots.reduce((sum, plot) => sum + plot.area, 0).toFixed(1)} ha
+          </p>
+        </Card>
+        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+          <p className="text-[14px] text-[#6B7280] mb-1">Avg Health Score</p>
+          <p className="text-[20px] text-[#111827]">
+            {Math.round(mockPlots.reduce((sum, plot) => sum + plot.healthScore, 0) / mockPlots.length)}%
+          </p>
+        </Card>
+        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+          <p className="text-[14px] text-[#6B7280] mb-1">Active Issues</p>
+          <p className="text-[20px] text-[#111827]">
+            {mockPlots.filter((p) => p.status === 'Stop' || p.status === 'Pending').length}
+          </p>
+        </Card>
+      </div>
+    </div>
+  );
+}
