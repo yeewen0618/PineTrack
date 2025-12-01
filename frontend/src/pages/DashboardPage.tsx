@@ -1,4 +1,3 @@
-import React from 'react';
 import { Card } from '../components/ui/card';
 import { WeatherCard } from '../components/WeatherCard';
 import { PlotCard } from '../components/PlotCard';
