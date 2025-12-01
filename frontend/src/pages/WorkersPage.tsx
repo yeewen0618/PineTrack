@@ -14,7 +14,7 @@ import {
 } from '../components/ui/dialog';
 import { mockWorkers, mockPlots, mockTasks } from '../lib/mockData';
 import { Plus, Search, Phone, CheckCircle2 } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 
 export function WorkersPage() {
   const [searchTerm, setSearchTerm] = useState('');
