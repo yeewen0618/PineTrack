@@ -1,20 +1,26 @@
+// This tells Next.js that this component must run on the client (because it uses interactivity)
 "use client";
 
+// Import all the Radix AlertDialog primitive components
 import * as React from "react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 
+// Utility function to merge Tailwind class names
 import { cn } from "./utils";
+// A helper that returns button styles (primary, outline, etc.)
 import { buttonVariants } from "./button";
 
 function AlertDialog({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
+  // Wrapper for the main AlertDialog root component
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
 }
 
 function AlertDialogTrigger({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Trigger>) {
+   // The element the user clicks to open the dialog
   return (
     <AlertDialogPrimitive.Trigger data-slot="alert-dialog-trigger" {...props} />
   );
@@ -23,6 +29,8 @@ function AlertDialogTrigger({
 function AlertDialogPortal({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Portal>) {
+  // Portal ensures the dialog renders OUTSIDE the normal DOM flow
+  // (always on top of everything)
   return (
     <AlertDialogPrimitive.Portal data-slot="alert-dialog-portal" {...props} />
   );
@@ -32,6 +40,7 @@ function AlertDialogOverlay({
   className,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Overlay>) {
+  // The dark background behind the dialog
   return (
     <AlertDialogPrimitive.Overlay
       data-slot="alert-dialog-overlay"
@@ -48,6 +57,7 @@ function AlertDialogContent({
   className,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content>) {
+  // The dialog box itself (white box on screen)
   return (
     <AlertDialogPortal>
       <AlertDialogOverlay />
@@ -67,6 +77,7 @@ function AlertDialogHeader({
   className,
   ...props
 }: React.ComponentProps<"div">) {
+  // Container for the title and description
   return (
     <div
       data-slot="alert-dialog-header"
@@ -80,6 +91,7 @@ function AlertDialogFooter({
   className,
   ...props
 }: React.ComponentProps<"div">) {
+  // Container for buttons (Cancel + Action)
   return (
     <div
       data-slot="alert-dialog-footer"
@@ -96,6 +108,7 @@ function AlertDialogTitle({
   className,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Title>) {
+  // Title text of the dialog (bold, bigger)
   return (
     <AlertDialogPrimitive.Title
       data-slot="alert-dialog-title"
@@ -109,6 +122,7 @@ function AlertDialogDescription({
   className,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Description>) {
+  // Description text under the title
   return (
     <AlertDialogPrimitive.Description
       data-slot="alert-dialog-description"
@@ -122,6 +136,7 @@ function AlertDialogAction({
   className,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Action>) {
+  // The confirmation button (e.g. “Delete”, “Continue”)
   return (
     <AlertDialogPrimitive.Action
       className={cn(buttonVariants(), className)}
@@ -134,6 +149,7 @@ function AlertDialogCancel({
   className,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Cancel>) {
+   // The cancel button (usually styled as outline)
   return (
     <AlertDialogPrimitive.Cancel
       className={cn(buttonVariants({ variant: "outline" }), className)}

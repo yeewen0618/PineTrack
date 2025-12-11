@@ -1,13 +1,19 @@
 import * as React from "react";
+// Slot allows the link component to become any element (a, button, etc.)
 import { Slot } from "@radix-ui/react-slot";
+// ChevronRight = ">" icon for separators
+// MoreHorizontal = "..." icon for collapsed breadcrumbs
 import { ChevronRight, MoreHorizontal } from "lucide-react";
-
+// Utility to merge class names
 import { cn } from "./utils";
 
+// Breadcrumb Container
 function Breadcrumb({ ...props }: React.ComponentProps<"nav">) {
+  // Wrapper nav element with accessibility label
   return <nav aria-label="breadcrumb" data-slot="breadcrumb" {...props} />;
 }
 
+// Breadcrumb List (holds all breadcrumb items)
 function BreadcrumbList({ className, ...props }: React.ComponentProps<"ol">) {
   return (
     <ol
@@ -21,6 +27,7 @@ function BreadcrumbList({ className, ...props }: React.ComponentProps<"ol">) {
   );
 }
 
+// Individual Breadcrumb Item
 function BreadcrumbItem({ className, ...props }: React.ComponentProps<"li">) {
   return (
     <li
@@ -31,6 +38,7 @@ function BreadcrumbItem({ className, ...props }: React.ComponentProps<"li">) {
   );
 }
 
+// Breadcrumb Link (clickable breadcrumb)
 function BreadcrumbLink({
   asChild,
   className,
@@ -38,6 +46,8 @@ function BreadcrumbLink({
 }: React.ComponentProps<"a"> & {
   asChild?: boolean;
 }) {
+  // If asChild = true, render Slot (inherit parent element type)
+  // Else render a standard <a>
   const Comp = asChild ? Slot : "a";
 
   return (
@@ -49,6 +59,7 @@ function BreadcrumbLink({
   );
 }
 
+// Current Page Breadcrumb (non-clickable)
 function BreadcrumbPage({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
@@ -62,6 +73,7 @@ function BreadcrumbPage({ className, ...props }: React.ComponentProps<"span">) {
   );
 }
 
+// Breadcrumb Separator (e.g., ">")
 function BreadcrumbSeparator({
   children,
   className,
@@ -80,6 +92,7 @@ function BreadcrumbSeparator({
   );
 }
 
+// Breadcrumb Ellipsis (for collapsed items)
 function BreadcrumbEllipsis({
   className,
   ...props

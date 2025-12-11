@@ -1,10 +1,14 @@
+// Required by Next.js so that this interactive component runs on the client
 "use client";
 
+// Import Radix Avatar components: Root, Image, Fallback
 import * as React from "react";
 import * as AvatarPrimitive from "@radix-ui/react-avatar";
 
+// Helper to merge Tailwind class names
 import { cn } from "./utils";
 
+//Avatar Container
 function Avatar({
   className,
   ...props
@@ -21,6 +25,7 @@ function Avatar({
   );
 }
 
+//Avatar Image
 function AvatarImage({
   className,
   ...props
@@ -34,6 +39,7 @@ function AvatarImage({
   );
 }
 
+//Avatar Fallback (shown if no image)
 function AvatarFallback({
   className,
   ...props
@@ -50,4 +56,5 @@ function AvatarFallback({
   );
 }
 
+// Export components for use in your app
 export { Avatar, AvatarImage, AvatarFallback };
