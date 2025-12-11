@@ -7,35 +7,40 @@ import { Sprout, Mail, Lock } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
 
 interface LoginPageProps {
-  onLogin: () => void;
+  onLogin: () => void; // callback when login succeeds
 }
 
 export function LoginPage({ onLogin }: LoginPageProps) {
+  // Local state for email, password, error message, and loading flag
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Handle form submission
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+    e.preventDefault(); // prevent page refresh
+    setError(''); // clear previous error
 
+    // Simple validation: require both fields
     if (!email || !password) {
       setError('Please enter both email and password');
       return;
     }
 
-    setLoading(true);
-    
+    setLoading(true); // show "Signing in..." state
+
     // Simulate API call
     setTimeout(() => {
       setLoading(false);
-      onLogin();
+      onLogin(); // call the onLogin callback to indicate success
     }, 1000);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
+    // Full-screen container, centered horizontally and vertically
+    <div className="min-h-screen w-screen flex items-center justify-center p-4">
+      {/* Limit the max width of the login card */}
       <div className="w-full max-w-md">
         {/* Logo and Title */}
         <div className="text-center mb-8">
@@ -59,6 +64,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               </Alert>
             )}
 
+            {/* Email input field */}
             <div className="space-y-2">
               <Label htmlFor="email" className="text-[#111827]">
                 Email Address
@@ -80,6 +86,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               </div>
             </div>
 
+            {/* Password input field */}
             <div className="space-y-2">
               <Label htmlFor="password" className="text-[#111827]">
                 Password
@@ -101,6 +108,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               </div>
             </div>
 
+            {/* Remember me + Forgot password row */}
             <div className="flex items-center justify-between text-sm">
               <label className="flex items-center gap-2 text-[#6B7280] cursor-pointer">
                 <input
@@ -118,6 +126,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               </a>
             </div>
 
+            {/* Submit button */}
             <Button
               type="submit"
               className="w-full h-12 bg-[#15803D] hover:bg-[#16A34A] text-white rounded-xl"
@@ -127,6 +136,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
             </Button>
           </form>
 
+          {/* Demo info text */}
           <div className="mt-6 text-center text-sm text-[#6B7280]">
             Demo credentials: Any email/password combination
           </div>

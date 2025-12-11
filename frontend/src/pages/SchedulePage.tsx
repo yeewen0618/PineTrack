@@ -192,7 +192,7 @@ export function SchedulePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-[#FAFFFE] to-[#EBF8EF] space-y-6">
+    <div className="space-y-6">
       {/* Header with current date */}
       <div className="flex items-center justify-between">
         <div>

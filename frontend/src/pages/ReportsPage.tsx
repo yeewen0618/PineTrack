@@ -33,8 +33,8 @@ export function ReportsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl text-[#111827] mb-1">Reports & History</h2>
-          <p className="text-[#6B7280]">View and export historical data and summaries</p>
+          <h2 className="text-[20px] text-[#111827]">Reports & History</h2>
+          <p className="text-[16px] text-[#374151]">View and export historical data and summaries</p>
         </div>
 
         <div className="flex gap-3">
@@ -105,17 +105,30 @@ export function ReportsPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="tasks" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 rounded-xl">
-          <TabsTrigger value="tasks" className="rounded-lg">
+        <TabsList className="grid w-full grid-cols-3 rounded-xl bg-transparent">
+          <TabsTrigger
+            value="tasks"
+            className="rounded-lg data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8]"
+          >
             Task History
           </TabsTrigger>
-          <TabsTrigger value="harvest" className="rounded-lg">
+
+          <TabsTrigger
+            value="harvest"
+            className="rounded-lg data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8]"
+          >
             Harvest Summary
           </TabsTrigger>
-          <TabsTrigger value="reschedule" className="rounded-lg">
+
+          <TabsTrigger
+            value="reschedule"
+            className="rounded-lg data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8]"
+          >
             Reschedule Log
           </TabsTrigger>
         </TabsList>
+
+
 
         {/* Task History */}
         <TabsContent value="tasks" className="mt-6">

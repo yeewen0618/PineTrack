@@ -76,7 +76,8 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-[#FAFFFE] to-[#EBF8EF] space-y-6">
+    <div className="space-y-6">
+      {/* Header directly on gradient */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-[20px] text-[#111827]">Plot Management</h2>
@@ -91,6 +92,8 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
               Add New Plot
             </Button>
           </DialogTrigger>
+
+          {/* Add Plot dialog content */}
           <DialogContent className="rounded-[20px] p-8 shadow-[0_8px_20px_rgba(0,0,0,0.15)]">
             <DialogHeader>
               <DialogTitle className="text-[20px]">Add New Plot</DialogTitle>
@@ -98,6 +101,8 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 Enter plot details. A 14-month schedule will be auto-generated.
               </DialogDescription>
             </DialogHeader>
+
+
             <form onSubmit={handleAddPlot} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="plotName" className="text-[14px]">Plot Name</Label>
@@ -170,16 +175,18 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 </select>
               </div>
 
-              <div className="flex gap-3 pt-2">
+              <div className="flex justify-end gap-3 pt-4">
                 <Button
                   type="button"
-                  variant="ghost"
-                  className="flex-1 rounded-xl text-[14px]"
+                  variant="outline"
+                  className="rounded-xl"
                   onClick={() => setIsAddDialogOpen(false)}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl text-[14px]">
+                <Button
+                  type="submit"
+                  className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl text-[14px]">
                   Add Plot
                 </Button>
               </div>
@@ -288,14 +295,16 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
 
       {/* Search and Filter */}
       <Card className="p-4 rounded-2xl bg-white shadow-sm">
-        <div className="flex items-center gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280]" size={18} />
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280]"
+              size={18} />
             <Input
               placeholder="Search plots by name or crop type..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 rounded-xl border-[#E5E7EB]"
+              className="pl-10 rounded-xl border-[#E5E7EB] focus:border-[#15803D] focus:ring-[#15803D]"
               aria-label="Search plots"
             />
           </div>
@@ -396,24 +405,24 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
       </Card>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <Card className="rounded-2xl bg-white shadow-sm p-4">
           <p className="text-[14px] text-[#6B7280] mb-1">Total Plots</p>
           <p className="text-[20px] text-[#111827]">{mockPlots.length}</p>
         </Card>
-        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+        <Card className="rounded-2xl bg-white shadow-sm p-4">
           <p className="text-[14px] text-[#6B7280] mb-1">Total Area</p>
           <p className="text-[20px] text-[#111827]">
             {mockPlots.reduce((sum, plot) => sum + plot.area, 0).toFixed(1)} ha
           </p>
         </Card>
-        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+        <Card className="rounded-2xl bg-white shadow-sm p-4">
           <p className="text-[14px] text-[#6B7280] mb-1">Avg Health Score</p>
           <p className="text-[20px] text-[#111827]">
             {Math.round(mockPlots.reduce((sum, plot) => sum + plot.healthScore, 0) / mockPlots.length)}%
           </p>
         </Card>
-        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+        <Card className="rounded-2xl bg-white shadow-sm p-4">
           <p className="text-[14px] text-[#6B7280] mb-1">Active Issues</p>
           <p className="text-[20px] text-[#111827]">
             {mockPlots.filter((p) => p.status === 'Stop' || p.status === 'Pending').length}

@@ -26,7 +26,7 @@ export function RescheduleCenterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-[#FAFFFE] to-[#EBF8EF] space-y-6">
+    <div className="space-y-6">
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-[20px] text-[#111827]">Reschedule Center</h2>

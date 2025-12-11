@@ -49,8 +49,8 @@ export function WorkersPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl text-[#111827] mb-1">Worker Management</h2>
-          <p className="text-[#6B7280]">Manage field workers and task assignments</p>
+          <h2 className="text-[20px] text-[#111827]">Worker Management</h2>
+          <p className="text-[16px] text-[#374151]">Manage field workers and task assignments</p>
         </div>
 
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>

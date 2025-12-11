@@ -50,7 +50,7 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
   const [forecastRange, setForecastRange] = useState<'1W' | '3M' | '1Y'>('1W');
 
   const historicalData = useMemo(() => generateMockSensorData(20), []);
-  
+
   const forecastData = useMemo(() => {
     const days = forecastRange === '1W' ? 7 : forecastRange === '3M' ? 90 : 365;
     return generateMockForecastData(days);
@@ -105,7 +105,7 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-[#FAFFFE] to-[#EBF8EF] space-y-6">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-4">
@@ -149,9 +149,8 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
               <p className="text-[18px] text-[#111827]">{plot.healthScore}%</p>
               <div className="flex-1 h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
                 <div
-                  className={`h-full rounded-full ${
-                    plot.healthScore >= 80 ? 'bg-[#16A34A]' : plot.healthScore >= 60 ? 'bg-[#CA8A04]' : 'bg-[#DC2626]'
-                  }`}
+                  className={`h-full rounded-full ${plot.healthScore >= 80 ? 'bg-[#16A34A]' : plot.healthScore >= 60 ? 'bg-[#CA8A04]' : 'bg-[#DC2626]'
+                    }`}
                   style={{ width: `${plot.healthScore}%` }}
                   role="progressbar"
                   aria-valuenow={plot.healthScore}
@@ -170,20 +169,76 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
           {/* Sensor Data Charts */}
           <Card className="p-6 rounded-2xl bg-white shadow-sm">
             <Tabs defaultValue="moisture" className="w-full">
-              <TabsList className="grid w-full grid-cols-4 rounded-xl mb-6">
-                <TabsTrigger value="moisture" className="rounded-lg gap-2">
+              <TabsList
+                className="
+        grid w-full grid-cols-4 gap-2
+        rounded-2xl mb-6 bg-transparent
+      "
+              >
+                <TabsTrigger
+                  value="moisture"
+                  className="
+          inline-flex items-center justify-center gap-2
+          rounded-xl px-3 py-2 text-sm
+          text-[#6B7280]
+          hover:bg-[#F3FFF7]
+          data-[state=active]:bg-[#DCFCE7]
+          data-[state=active]:text-[#15803D]
+          data-[state=active]:shadow-sm
+          transition-colors
+        "
+                >
                   <Droplets size={16} />
                   Moisture
                 </TabsTrigger>
-                <TabsTrigger value="ph" className="rounded-lg gap-2">
+
+                <TabsTrigger
+                  value="ph"
+                  className="
+          inline-flex items-center justify-center gap-2
+          rounded-xl px-3 py-2 text-sm
+          text-[#6B7280]
+          hover:bg-[#F3FFF7]
+          data-[state=active]:bg-[#DCFCE7]
+          data-[state=active]:text-[#15803D]
+          data-[state=active]:shadow-sm
+          transition-colors
+        "
+                >
                   <FlaskConical size={16} />
                   pH
                 </TabsTrigger>
-                <TabsTrigger value="nitrogen" className="rounded-lg gap-2">
+
+                <TabsTrigger
+                  value="nitrogen"
+                  className="
+          inline-flex items-center justify-center gap-2
+          rounded-xl px-3 py-2 text-sm
+          text-[#6B7280]
+          hover:bg-[#F3FFF7]
+          data-[state=active]:bg-[#DCFCE7]
+          data-[state=active]:text-[#15803D]
+          data-[state=active]:shadow-sm
+          transition-colors
+        "
+                >
                   <Leaf size={16} />
                   Nitrogen
                 </TabsTrigger>
-                <TabsTrigger value="temp" className="rounded-lg gap-2">
+
+                <TabsTrigger
+                  value="temp"
+                  className="
+          inline-flex items-center justify-center gap-2
+          rounded-xl px-3 py-2 text-sm
+          text-[#6B7280]
+          hover:bg-[#F3FFF7]
+          data-[state=active]:bg-[#DCFCE7]
+          data-[state=active]:text-[#15803D]
+          data-[state=active]:shadow-sm
+          transition-colors
+        "
+                >
                   <ThermometerSun size={16} />
                   Temperature
                 </TabsTrigger>
@@ -206,28 +261,28 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis 
-                          dataKey="date" 
-                          stroke="#6B7280" 
-                          fontSize={12} 
+                        <XAxis
+                          dataKey="date"
+                          stroke="#6B7280"
+                          fontSize={12}
                           tickFormatter={formatXAxis}
                           interval="preserveStartEnd"
                         />
-                        <YAxis 
-                          stroke="#6B7280" 
-                          fontSize={12} 
-                          label={{ value: '%', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                        <YAxis
+                          stroke="#6B7280"
+                          fontSize={12}
+                          label={{ value: '%', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                         />
-                        <Tooltip 
+                        <Tooltip
                           contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                           labelStyle={{ color: '#111827' }}
                         />
-                        <Area 
-                          type="monotone" 
-                          dataKey="moisture" 
-                          stroke="#16A34A" 
-                          fill="url(#moistureHistGradient)" 
-                          strokeWidth={2} 
+                        <Area
+                          type="monotone"
+                          dataKey="moisture"
+                          stroke="#16A34A"
+                          fill="url(#moistureHistGradient)"
+                          strokeWidth={2}
                         />
                       </AreaChart>
                     </ResponsiveContainer>
@@ -252,27 +307,27 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis 
-                          dataKey="date" 
-                          stroke="#6B7280" 
-                          fontSize={12} 
+                        <XAxis
+                          dataKey="date"
+                          stroke="#6B7280"
+                          fontSize={12}
                           tickFormatter={formatXAxis}
                           interval="preserveStartEnd"
                         />
-                        <YAxis 
-                          stroke="#6B7280" 
-                          fontSize={12} 
-                          label={{ value: '%', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                        <YAxis
+                          stroke="#6B7280"
+                          fontSize={12}
+                          label={{ value: '%', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                         />
-                        <Tooltip 
+                        <Tooltip
                           contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                           labelStyle={{ color: '#111827' }}
                         />
-                        <Area 
-                          type="monotone" 
-                          dataKey="moisture" 
-                          stroke="#86EFAC" 
-                          fill="url(#moistureForeGradient)" 
+                        <Area
+                          type="monotone"
+                          dataKey="moisture"
+                          stroke="#86EFAC"
+                          fill="url(#moistureForeGradient)"
                           strokeWidth={2}
                           strokeDasharray="5 5"
                         />
@@ -297,20 +352,20 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
                     <ResponsiveContainer width="100%" height={280}>
                       <LineChart data={historicalData}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis 
-                          dataKey="date" 
-                          stroke="#6B7280" 
-                          fontSize={12} 
+                        <XAxis
+                          dataKey="date"
+                          stroke="#6B7280"
+                          fontSize={12}
                           tickFormatter={formatXAxis}
                           interval="preserveStartEnd"
                         />
-                        <YAxis 
-                          stroke="#6B7280" 
-                          fontSize={12} 
+                        <YAxis
+                          stroke="#6B7280"
+                          fontSize={12}
                           domain={[4, 8]}
-                          label={{ value: 'pH', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                          label={{ value: 'pH', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                         />
-                        <Tooltip 
+                        <Tooltip
                           contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                           labelStyle={{ color: '#111827' }}
                         />
@@ -332,30 +387,30 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
                     <ResponsiveContainer width="100%" height={280}>
                       <LineChart data={forecastData} key={forecastRange}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis 
-                          dataKey="date" 
-                          stroke="#6B7280" 
-                          fontSize={12} 
+                        <XAxis
+                          dataKey="date"
+                          stroke="#6B7280"
+                          fontSize={12}
                           tickFormatter={formatXAxis}
                           interval="preserveStartEnd"
                         />
-                        <YAxis 
-                          stroke="#6B7280" 
-                          fontSize={12} 
+                        <YAxis
+                          stroke="#6B7280"
+                          fontSize={12}
                           domain={[4, 8]}
-                          label={{ value: 'pH', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                          label={{ value: 'pH', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                         />
-                        <Tooltip 
+                        <Tooltip
                           contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                           labelStyle={{ color: '#111827' }}
                         />
-                        <Line 
-                          type="monotone" 
-                          dataKey="ph" 
-                          stroke="#86EFAC" 
-                          strokeWidth={2} 
+                        <Line
+                          type="monotone"
+                          dataKey="ph"
+                          stroke="#86EFAC"
+                          strokeWidth={2}
                           strokeDasharray="5 5"
-                          dot={{ r: 3 }} 
+                          dot={{ r: 3 }}
                         />
                       </LineChart>
                     </ResponsiveContainer>
@@ -378,19 +433,19 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
                     <ResponsiveContainer width="100%" height={280}>
                       <LineChart data={historicalData}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis 
-                          dataKey="date" 
-                          stroke="#6B7280" 
-                          fontSize={12} 
+                        <XAxis
+                          dataKey="date"
+                          stroke="#6B7280"
+                          fontSize={12}
                           tickFormatter={formatXAxis}
                           interval="preserveStartEnd"
                         />
-                        <YAxis 
-                          stroke="#6B7280" 
-                          fontSize={12} 
-                          label={{ value: 'mg/kg', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                        <YAxis
+                          stroke="#6B7280"
+                          fontSize={12}
+                          label={{ value: 'mg/kg', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                         />
-                        <Tooltip 
+                        <Tooltip
                           contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                           labelStyle={{ color: '#111827' }}
                         />
@@ -412,29 +467,29 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
                     <ResponsiveContainer width="100%" height={280}>
                       <LineChart data={forecastData} key={forecastRange}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis 
-                          dataKey="date" 
-                          stroke="#6B7280" 
-                          fontSize={12} 
+                        <XAxis
+                          dataKey="date"
+                          stroke="#6B7280"
+                          fontSize={12}
                           tickFormatter={formatXAxis}
                           interval="preserveStartEnd"
                         />
-                        <YAxis 
-                          stroke="#6B7280" 
-                          fontSize={12} 
-                          label={{ value: 'mg/kg', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                        <YAxis
+                          stroke="#6B7280"
+                          fontSize={12}
+                          label={{ value: 'mg/kg', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                         />
-                        <Tooltip 
+                        <Tooltip
                           contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                           labelStyle={{ color: '#111827' }}
                         />
-                        <Line 
-                          type="monotone" 
-                          dataKey="nitrogen" 
-                          stroke="#86EFAC" 
-                          strokeWidth={2} 
+                        <Line
+                          type="monotone"
+                          dataKey="nitrogen"
+                          stroke="#86EFAC"
+                          strokeWidth={2}
                           strokeDasharray="5 5"
-                          dot={{ r: 3 }} 
+                          dot={{ r: 3 }}
                         />
                       </LineChart>
                     </ResponsiveContainer>
@@ -463,19 +518,19 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis 
-                          dataKey="date" 
-                          stroke="#6B7280" 
-                          fontSize={12} 
+                        <XAxis
+                          dataKey="date"
+                          stroke="#6B7280"
+                          fontSize={12}
                           tickFormatter={formatXAxis}
                           interval="preserveStartEnd"
                         />
-                        <YAxis 
-                          stroke="#6B7280" 
-                          fontSize={12} 
-                          label={{ value: '°C', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                        <YAxis
+                          stroke="#6B7280"
+                          fontSize={12}
+                          label={{ value: '°C', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                         />
-                        <Tooltip 
+                        <Tooltip
                           contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                           labelStyle={{ color: '#111827' }}
                         />
@@ -503,27 +558,27 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis 
-                          dataKey="date" 
-                          stroke="#6B7280" 
-                          fontSize={12} 
+                        <XAxis
+                          dataKey="date"
+                          stroke="#6B7280"
+                          fontSize={12}
                           tickFormatter={formatXAxis}
                           interval="preserveStartEnd"
                         />
-                        <YAxis 
-                          stroke="#6B7280" 
-                          fontSize={12} 
-                          label={{ value: '°C', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                        <YAxis
+                          stroke="#6B7280"
+                          fontSize={12}
+                          label={{ value: '°C', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                         />
-                        <Tooltip 
+                        <Tooltip
                           contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                           labelStyle={{ color: '#111827' }}
                         />
-                        <Area 
-                          type="monotone" 
-                          dataKey="temperature" 
-                          stroke="#86EFAC" 
-                          fill="url(#tempForeGradient)" 
+                        <Area
+                          type="monotone"
+                          dataKey="temperature"
+                          stroke="#86EFAC"
+                          fill="url(#tempForeGradient)"
                           strokeWidth={2}
                           strokeDasharray="5 5"
                         />
@@ -564,11 +619,10 @@ export function PlotDetailsPage({ plotId, onNavigate }: PlotDetailsPageProps) {
                   <button
                     key={day}
                     onClick={() => setSelectedDate(`${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`)}
-                    className={`min-h-[100px] p-2 rounded-lg border transition-all ${
-                      isTodayCell
+                    className={`min-h-[100px] p-2 rounded-lg border transition-all ${isTodayCell
                         ? 'border-[#15803D] bg-[#DCFCE7] border-2'
                         : 'border-[#E5E7EB] hover:border-[#15803D] hover:bg-[#F9FAFB]'
-                    }`}
+                      }`}
                     aria-label={`Day ${day}, ${tasks.length} tasks`}
                   >
                     <div className="text-[14px] text-[#111827] mb-1">{day}</div>

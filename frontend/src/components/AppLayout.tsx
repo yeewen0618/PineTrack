@@ -137,7 +137,7 @@ export function AppLayout({ children, currentPage, onNavigate }: AppLayoutProps)
 
         {/* Page Content */}
         <main className="flex-1 overflow-auto">
-          <div className="p-6">{children}</div>
+          <div className="p-8 lg:p-10 space-y-8">{children}</div>
         </main>
       </div>
     </div>
