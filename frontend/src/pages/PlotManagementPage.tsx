@@ -87,7 +87,7 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
         {/* Add New Plot Dialog */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-[#15803D] hover:bg-[#16A34A] rounded-xl gap-2">
+            <Button className="bg-[#16A34A] hover:bg-[#16A34A] rounded-xl gap-2">
               <Plus size={20} />
               Add New Plot
             </Button>
@@ -186,7 +186,7 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 </Button>
                 <Button
                   type="submit"
-                  className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl text-[14px]">
+                  className="flex-1 bg-[#16A34A] hover:bg-[#16A34A] rounded-xl text-[14px]">
                   Add Plot
                 </Button>
               </div>

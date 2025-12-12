@@ -275,7 +275,7 @@ export function ConfigurationPage() {
 
             <div className="flex gap-3 mt-6">
               <Button
-                className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl gap-2"
+                className="flex-1 bg-[#16A34A] hover:bg-[#16A34A] rounded-xl gap-2"
                 onClick={handleSaveThresholds}
               >
                 <Save size={16} />

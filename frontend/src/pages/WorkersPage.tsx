@@ -58,7 +58,7 @@ export function WorkersPage() {
 
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-[#15803D] hover:bg-[#16A34A] rounded-xl gap-2">
+            <Button className="bg-[#16A34A] hover:bg-[#16A34A] rounded-xl gap-2">
               <Plus size={20} />
               Add Worker
             </Button>
@@ -119,7 +119,7 @@ export function WorkersPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl">
+                <Button type="submit" className="flex-1 bg-[#16A34A] hover:bg-[#16A34A] rounded-xl">
                   Add Worker
                 </Button>
               </div>
