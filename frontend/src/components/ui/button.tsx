@@ -51,28 +51,25 @@ const buttonVariants = cva(
 );
 
 // Button component definition
-function Button({
-  className,
-  variant,
-  size,
-  asChild = false,
-  ...props
-}: React.ComponentProps<"button"> &
+const Button = React.forwardRef<
+  HTMLButtonElement,
+  React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean;
-  }) {
-  // If asChild is true → render Slot (inherits parent component type)
-  // Else → render a regular <button>
+  }
+>(({ className, variant, size, asChild = false, ...props }, ref) => {
   const Comp = asChild ? Slot : "button";
 
   return (
     <Comp
+      ref={ref}
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />
   );
-}
+});
 
-// Export the component and variants for use in your app
+Button.displayName = "Button";
+
 export { Button, buttonVariants };

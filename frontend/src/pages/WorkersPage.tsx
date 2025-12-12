@@ -3,7 +3,7 @@ import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Avatar, AvatarFallback } from '../components/ui/avatar';
+import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
 import {
   Dialog,
   DialogContent,
@@ -25,9 +25,12 @@ export function WorkersPage() {
     contact: ''
   });
 
-  const filteredWorkers = mockWorkers.filter((worker) =>
-    worker.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Fix: Ensure mockWorkers is always an array
+  const filteredWorkers = Array.isArray(mockWorkers)
+    ? mockWorkers.filter((worker) =>
+        worker.name.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    : [];
 
   const handleAddWorker = (e: React.FormEvent) => {
     e.preventDefault();
@@ -173,10 +176,9 @@ export function WorkersPage() {
             <Card key={worker.id} className="p-6 rounded-2xl bg-white hover:shadow-lg transition-shadow">
               {/* Worker Header */}
               <div className="flex items-start gap-4 mb-4">
-                <Avatar className="w-14 h-14 bg-gradient-to-br from-[#15803D] to-[#16A34A] text-white">
-                  <AvatarFallback className="bg-transparent text-white">
-                    {getWorkerInitials(worker.name)}
-                  </AvatarFallback>
+                <Avatar>
+                  <AvatarImage src={worker.avatarUrl || undefined} alt={worker.name} />
+                  <AvatarFallback>{getWorkerInitials(worker.name)}</AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-[#111827] truncate">{worker.name}</h3>
