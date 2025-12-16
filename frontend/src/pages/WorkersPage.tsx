@@ -15,6 +15,7 @@ import {
 import { mockWorkers, mockPlots, mockTasks } from '../lib/mockData';
 import { Plus, Search, Phone, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useEffect } from "react";
 
 export function WorkersPage() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -24,6 +25,18 @@ export function WorkersPage() {
     role: 'Field Worker',
     contact: ''
   });
+
+  // useEffect(() => {
+  //   fetch("http://127.0.0.1:5000/api/health")
+  //     .then(res => res.json())
+  //     .then(data => console.log(data));
+  // }, []);
+
+  // return (
+  //   <div>
+  //     Workers Page
+  //   </div>
+  // );
 
   // Fix: Ensure mockWorkers is always an array
   const filteredWorkers = Array.isArray(mockWorkers)
