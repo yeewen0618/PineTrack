@@ -1,0 +1,11 @@
+Core backend logic and shared utilities:
+- Database connection
+- Authentication & security logic
+- Global configuration
+Used across routers and services.
+
+core/
+├── config.py     # environment variables
+├── security.py   # JWT, password hashing
+├── database.py   # Supabase / DB connection
+

@@ -5,6 +5,8 @@ import { Label } from '../components/ui/label';
 import { Card } from '../components/ui/card';
 import { Sprout, Mail, Lock } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
+import { login } from "../lib/api";
+
 
 interface LoginPageProps {
   onLogin: () => void; // callback when login succeeds
@@ -12,29 +14,46 @@ interface LoginPageProps {
 
 export function LoginPage({ onLogin }: LoginPageProps) {
   // Local state for email, password, error message, and loading flag
-  const [email, setEmail] = useState('');
+  // const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   // Handle form submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); // prevent page refresh
     setError(''); // clear previous error
 
     // Simple validation: require both fields
-    if (!email || !password) {
+    if (!username || !password) {
       setError('Please enter both email and password');
       return;
     }
 
-    setLoading(true); // show "Signing in..." state
+    setLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const res = await fetch('http://127.0.0.1:8000/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || 'Invalid credentials');
+      }
+
+      const data = await res.json(); // { access_token, token_type }
+      localStorage.setItem('access_token', data.access_token);
+
+      onLogin();
+    } catch (err: any) {
+      setError('Login failed. Please check username/password.');
+    } finally {
       setLoading(false);
-      onLogin(); // call the onLogin callback to indicate success
-    }, 1000);
+    }
   };
 
   return (
@@ -66,8 +85,8 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
             {/* Email input field */}
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-[#111827]">
-                Email Address
+              <Label htmlFor="username" className="text-[#111827]">
+                Username
               </Label>
               <div className="relative">
                 <Mail
@@ -75,11 +94,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   size={18}
                 />
                 <Input
-                  id="email"
-                  type="email"
-                  placeholder="Enter your email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="username"
+                  type="username"
+                  placeholder="Enter your username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                   className="pl-10 h-12 rounded-xl border-[#E5E7EB] focus:border-[#15803D] focus:ring-[#15803D]"
                   aria-required="true"
                 />
@@ -138,7 +157,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
           {/* Demo info text */}
           <div className="mt-6 text-center text-sm text-[#6B7280]">
-            Demo credentials: Any email/password combination
+            Demo credentials: admin / 123456
           </div>
         </Card>
 
