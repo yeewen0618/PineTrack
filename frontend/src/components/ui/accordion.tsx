@@ -1,17 +1,29 @@
 "use client";
 
+// Core React and Radix UI imports
 import * as React from "react";
 import * as AccordionPrimitive from "@radix-ui/react-accordion";
 import { ChevronDownIcon } from "lucide-react";
 
+// Utility to merge Tailwind class names cleanly
 import { cn } from "./utils";
 
+/**
+ * Accordion Root Component
+ * - This is the main wrapper for the whole accordion group.
+ * - All props are passed directly to Radix's Root component.
+ */
 function Accordion({
   ...props
 }: React.ComponentProps<typeof AccordionPrimitive.Root>) {
   return <AccordionPrimitive.Root data-slot="accordion" {...props} />;
 }
 
+/**
+ * Accordion Item Component
+ * - Represents one collapsible section (header + content).
+ * - Adds borders and merges class names.
+ */
 function AccordionItem({
   className,
   ...props
@@ -25,6 +37,12 @@ function AccordionItem({
   );
 }
 
+/**
+ * Accordion Trigger Component
+ * - The clickable button that opens/closes the item.
+ * - Contains a Chevron icon that rotates based on state.
+ * - Includes accessibility and focus styles.
+ */
 function AccordionTrigger({
   className,
   children,
@@ -47,6 +65,11 @@ function AccordionTrigger({
   );
 }
 
+/**
+ * Accordion Content Component
+ * - The collapsible content area.
+ * - Uses animations depending on open/closed state.
+ */
 function AccordionContent({
   className,
   children,
@@ -63,4 +86,5 @@ function AccordionContent({
   );
 }
 
+// Export all the components for use in your project
 export { Accordion, AccordionItem, AccordionTrigger, AccordionContent };

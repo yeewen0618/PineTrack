@@ -3,7 +3,7 @@ import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Avatar, AvatarFallback } from '../components/ui/avatar';
+import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,8 @@ import {
 import { mockWorkers, mockPlots, mockTasks } from '../lib/mockData';
 import { Plus, Search, Phone, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useEffect } from "react";
+import { apiFetch } from "../lib/api";
 
 export function WorkersPage() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -25,9 +27,22 @@ export function WorkersPage() {
     contact: ''
   });
 
-  const filteredWorkers = mockWorkers.filter((worker) =>
-    worker.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  useEffect(() => {
+    apiFetch<{ status: string; rows: any[] }>("/api/db-test")
+      .then((data) => {
+        console.log("DB TEST RESULT:", data);
+      })
+      .catch((err) => {
+        console.error("DB TEST ERROR:", err.message);
+      });
+  }, [])
+
+  // Fix: Ensure mockWorkers is always an array
+  const filteredWorkers = Array.isArray(mockWorkers)
+    ? mockWorkers.filter((worker) =>
+      worker.name.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    : [];
 
   const handleAddWorker = (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,13 +64,13 @@ export function WorkersPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl text-[#111827] mb-1">Worker Management</h2>
-          <p className="text-[#6B7280]">Manage field workers and task assignments</p>
+          <h2 className="text-[20px] text-[#111827]">Worker Management</h2>
+          <p className="text-[16px] text-[#374151]">Manage field workers and task assignments</p>
         </div>
 
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-[#15803D] hover:bg-[#16A34A] rounded-xl gap-2">
+            <Button className="bg-[#16A34A] hover:bg-[#16A34A] rounded-xl gap-2">
               <Plus size={20} />
               Add Worker
             </Button>
@@ -116,7 +131,7 @@ export function WorkersPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl">
+                <Button type="submit" className="flex-1 bg-[#16A34A] hover:bg-[#16A34A] rounded-xl">
                   Add Worker
                 </Button>
               </div>
@@ -173,10 +188,9 @@ export function WorkersPage() {
             <Card key={worker.id} className="p-6 rounded-2xl bg-white hover:shadow-lg transition-shadow">
               {/* Worker Header */}
               <div className="flex items-start gap-4 mb-4">
-                <Avatar className="w-14 h-14 bg-gradient-to-br from-[#15803D] to-[#16A34A] text-white">
-                  <AvatarFallback className="bg-transparent text-white">
-                    {getWorkerInitials(worker.name)}
-                  </AvatarFallback>
+                <Avatar>
+                  <AvatarImage src={worker.avatarUrl || undefined} alt={worker.name} />
+                  <AvatarFallback>{getWorkerInitials(worker.name)}</AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-[#111827] truncate">{worker.name}</h3>

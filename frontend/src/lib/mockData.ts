@@ -34,6 +34,7 @@ export interface Worker {
   assignedPlots: string[];
   tasksCompleted: number;
   contact: string;
+  avatarUrl?: string;
 }
 
 export interface SensorData {
@@ -615,7 +616,9 @@ export const mockWorkers: Worker[] = [
     role: 'Field Supervisor',
     assignedPlots: ['P001', 'P002'],
     tasksCompleted: 124,
-    contact: '+63 912 345 6789'
+    contact: '+63 912 345 6789',
+    avatarUrl: '',
+    
   },
   {
     id: 'W002',
@@ -623,7 +626,8 @@ export const mockWorkers: Worker[] = [
     role: 'Field Worker',
     assignedPlots: ['P002', 'P006'],
     tasksCompleted: 98,
-    contact: '+63 923 456 7890'
+    contact: '+63 923 456 7890',
+    avatarUrl: '',
   },
   {
     id: 'W003',
@@ -631,7 +635,8 @@ export const mockWorkers: Worker[] = [
     role: 'Soil Specialist',
     assignedPlots: ['P003'],
     tasksCompleted: 76,
-    contact: '+63 934 567 8901'
+    contact: '+63 934 567 8901',
+    avatarUrl: '',
   },
   {
     id: 'W004',
@@ -639,7 +644,8 @@ export const mockWorkers: Worker[] = [
     role: 'Field Worker',
     assignedPlots: ['P004', 'P005'],
     tasksCompleted: 112,
-    contact: '+63 945 678 9012'
+    contact: '+63 945 678 9012',
+    avatarUrl: '',
   },
   {
     id: 'W005',
@@ -647,7 +653,8 @@ export const mockWorkers: Worker[] = [
     role: 'Irrigation Technician',
     assignedPlots: ['P005', 'P001'],
     tasksCompleted: 89,
-    contact: '+63 956 789 0123'
+    contact: '+63 956 789 0123',
+    avatarUrl: '',
   }
 ];
 

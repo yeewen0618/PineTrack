@@ -161,6 +161,15 @@
     /* @apply border-border outline-ring/50; */
   }
 
+  html,
+  body,
+  #root {
+    /* Make sure the whole app takes full viewport width/height */
+    height: 100%;
+    width: 100%;
+    margin: 0;
+  }
+
   body {
     @apply bg-gradient-to-br from-white via-[#EBF8EF] to-[#EBF8EF] text-gray-900;
     font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

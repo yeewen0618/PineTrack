@@ -1,0 +1,9 @@
+This folder contains Pydantic schemas used for:
+- Request validation
+- Response serialization
+- Data contracts between frontend and backend
+
+Example:
+class LoginRequest(BaseModel):
+    username: str
+    password: str

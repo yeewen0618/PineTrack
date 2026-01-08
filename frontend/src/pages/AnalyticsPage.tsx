@@ -28,9 +28,9 @@ import { ForecastFilter } from '../components/ForecastFilter';
 export function AnalyticsPage() {
   const [selectedPlot, setSelectedPlot] = useState<string>('all');
   const [forecastRange, setForecastRange] = useState<'1W' | '3M' | '1Y'>('1W');
-  
+
   const historicalData = useMemo(() => generateMockSensorData(20), []);
-  
+
   const forecastData = useMemo(() => {
     const days = forecastRange === '1W' ? 7 : forecastRange === '3M' ? 90 : 365;
     return generateMockForecastData(days);
@@ -48,7 +48,7 @@ export function AnalyticsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-[#FAFFFE] to-[#EBF8EF] space-y-6">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-[20px] text-[#111827]">Analytics & Insights</h2>
@@ -132,23 +132,88 @@ export function AnalyticsPage() {
       {/* Detailed Charts */}
       <Card className="p-6 rounded-2xl bg-white shadow-sm">
         <Tabs defaultValue="moisture" className="w-full">
-          <TabsList className="grid w-full grid-cols-5 rounded-xl mb-6">
-            <TabsTrigger value="moisture" className="rounded-lg">
+          <TabsList
+            className="
+    grid w-full grid-cols-5 gap-2
+    bg-transparent rounded-2xl mb-6
+  "
+          >
+            <TabsTrigger
+              value="moisture"
+              className="
+      rounded-xl px-3 py-2 text-sm
+      text-[#6B7280]
+      hover:bg-[#F3FFF7]
+      data-[state=active]:bg-[#DCFCE7]
+      data-[state=active]:text-[#15803D]
+      data-[state=active]:shadow-sm
+      transition-colors
+    "
+            >
               Moisture
             </TabsTrigger>
-            <TabsTrigger value="ph" className="rounded-lg">
+
+            <TabsTrigger
+              value="ph"
+              className="
+      rounded-xl px-3 py-2 text-sm
+      text-[#6B7280]
+      hover:bg-[#F3FFF7]
+      data-[state=active]:bg-[#DCFCE7]
+      data-[state=active]:text-[#15803D]
+      data-[state=active]:shadow-sm
+      transition-colors
+    "
+            >
               pH Levels
             </TabsTrigger>
-            <TabsTrigger value="nitrogen" className="rounded-lg">
+
+            <TabsTrigger
+              value="nitrogen"
+              className="
+      rounded-xl px-3 py-2 text-sm
+      text-[#6B7280]
+      hover:bg-[#F3FFF7]
+      data-[state=active]:bg-[#DCFCE7]
+      data-[state=active]:text-[#15803D]
+      data-[state=active]:shadow-sm
+      transition-colors
+    "
+            >
               Nitrogen
             </TabsTrigger>
-            <TabsTrigger value="temp" className="rounded-lg">
+
+            <TabsTrigger
+              value="temp"
+              className="
+      rounded-xl px-3 py-2 text-sm
+      text-[#6B7280]
+      hover:bg-[#F3FFF7]
+      data-[state=active]:bg-[#DCFCE7]
+      data-[state=active]:text-[#15803D]
+      data-[state=active]:shadow-sm
+      transition-colors
+    "
+            >
               Temperature
             </TabsTrigger>
-            <TabsTrigger value="rainfall" className="rounded-lg">
+
+            <TabsTrigger
+              value="rainfall"
+              className="
+      rounded-xl px-3 py-2 text-sm
+      text-[#6B7280]
+      hover:bg-[#F3FFF7]
+      data-[state=active]:bg-[#DCFCE7]
+      data-[state=active]:text-[#15803D]
+      data-[state=active]:shadow-sm
+      transition-colors
+    "
+            >
               Rainfall
             </TabsTrigger>
           </TabsList>
+
 
           <TabsContent value="moisture" className="mt-0">
             <h3 className="text-[20px] text-[#111827] mb-6">Soil Moisture Analysis</h3>
@@ -167,29 +232,29 @@ export function AnalyticsPage() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <XAxis
+                      dataKey="date"
+                      stroke="#6B7280"
+                      fontSize={12}
                       tickFormatter={formatXAxis}
                       interval="preserveStartEnd"
                     />
-                    <YAxis 
-                      stroke="#6B7280" 
-                      fontSize={12} 
-                      label={{ value: '%', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
+                      label={{ value: '%', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
                     />
-                    <Area 
-                      type="monotone" 
-                      dataKey="moisture" 
-                      stroke="#16A34A" 
-                      fill="url(#moistureHistGradient)" 
+                    <Area
+                      type="monotone"
+                      dataKey="moisture"
+                      stroke="#16A34A"
+                      fill="url(#moistureHistGradient)"
                       strokeWidth={2}
-                      name="Moisture (%)" 
+                      name="Moisture (%)"
                     />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -214,27 +279,27 @@ export function AnalyticsPage() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <XAxis
+                      dataKey="date"
+                      stroke="#6B7280"
+                      fontSize={12}
                       tickFormatter={formatXAxis}
                       interval="preserveStartEnd"
                     />
-                    <YAxis 
-                      stroke="#6B7280" 
-                      fontSize={12} 
-                      label={{ value: '%', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
+                      label={{ value: '%', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
                     />
-                    <Area 
-                      type="monotone" 
-                      dataKey="moisture" 
-                      stroke="#86EFAC" 
-                      fill="url(#moistureForeGradient)" 
+                    <Area
+                      type="monotone"
+                      dataKey="moisture"
+                      stroke="#86EFAC"
+                      fill="url(#moistureForeGradient)"
                       strokeWidth={2}
                       strokeDasharray="5 5"
                       name="Moisture (%)"
@@ -260,28 +325,28 @@ export function AnalyticsPage() {
                 <ResponsiveContainer width="100%" height={320}>
                   <LineChart data={historicalData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <XAxis
+                      dataKey="date"
+                      stroke="#6B7280"
+                      fontSize={12}
                       tickFormatter={formatXAxis}
                       interval="preserveStartEnd"
                     />
-                    <YAxis 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
                       domain={[4, 8]}
-                      label={{ value: 'pH', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                      label={{ value: 'pH', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
                     />
-                    <Line 
-                      type="monotone" 
-                      dataKey="ph" 
-                      stroke="#16A34A" 
-                      strokeWidth={2} 
+                    <Line
+                      type="monotone"
+                      dataKey="ph"
+                      stroke="#16A34A"
+                      strokeWidth={2}
                       dot={{ r: 3 }}
                       name="pH Level"
                     />
@@ -302,28 +367,28 @@ export function AnalyticsPage() {
                 <ResponsiveContainer width="100%" height={320}>
                   <LineChart data={forecastData} key={forecastRange}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <XAxis
+                      dataKey="date"
+                      stroke="#6B7280"
+                      fontSize={12}
                       tickFormatter={formatXAxis}
                       interval="preserveStartEnd"
                     />
-                    <YAxis 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
                       domain={[4, 8]}
-                      label={{ value: 'pH', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                      label={{ value: 'pH', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
                     />
-                    <Line 
-                      type="monotone" 
-                      dataKey="ph" 
-                      stroke="#86EFAC" 
-                      strokeWidth={2} 
+                    <Line
+                      type="monotone"
+                      dataKey="ph"
+                      stroke="#86EFAC"
+                      strokeWidth={2}
                       strokeDasharray="5 5"
                       dot={{ r: 3 }}
                       name="pH Level"
@@ -349,27 +414,27 @@ export function AnalyticsPage() {
                 <ResponsiveContainer width="100%" height={320}>
                   <BarChart data={historicalData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <XAxis
+                      dataKey="date"
+                      stroke="#6B7280"
+                      fontSize={12}
                       tickFormatter={formatXAxis}
                       interval="preserveStartEnd"
                     />
-                    <YAxis 
-                      stroke="#6B7280" 
-                      fontSize={12} 
-                      label={{ value: 'mg/kg', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
+                      label={{ value: 'mg/kg', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
                     />
-                    <Bar 
-                      dataKey="nitrogen" 
-                      fill="#16A34A" 
-                      radius={[8, 8, 0, 0]} 
-                      name="Nitrogen (mg/kg)" 
+                    <Bar
+                      dataKey="nitrogen"
+                      fill="#16A34A"
+                      radius={[8, 8, 0, 0]}
+                      name="Nitrogen (mg/kg)"
                     />
                   </BarChart>
                 </ResponsiveContainer>
@@ -388,26 +453,26 @@ export function AnalyticsPage() {
                 <ResponsiveContainer width="100%" height={320}>
                   <BarChart data={forecastData} key={forecastRange}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <XAxis
+                      dataKey="date"
+                      stroke="#6B7280"
+                      fontSize={12}
                       tickFormatter={formatXAxis}
                       interval="preserveStartEnd"
                     />
-                    <YAxis 
-                      stroke="#6B7280" 
-                      fontSize={12} 
-                      label={{ value: 'mg/kg', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
+                      label={{ value: 'mg/kg', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
                     />
-                    <Bar 
-                      dataKey="nitrogen" 
-                      fill="#86EFAC" 
-                      radius={[8, 8, 0, 0]} 
+                    <Bar
+                      dataKey="nitrogen"
+                      fill="#86EFAC"
+                      radius={[8, 8, 0, 0]}
                       name="Nitrogen (mg/kg)"
                     />
                   </BarChart>
@@ -437,27 +502,27 @@ export function AnalyticsPage() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <XAxis
+                      dataKey="date"
+                      stroke="#6B7280"
+                      fontSize={12}
                       tickFormatter={formatXAxis}
                       interval="preserveStartEnd"
                     />
-                    <YAxis 
-                      stroke="#6B7280" 
-                      fontSize={12} 
-                      label={{ value: '°C', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
+                      label={{ value: '°C', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
                     />
-                    <Area 
-                      type="monotone" 
-                      dataKey="temperature" 
-                      stroke="#16A34A" 
-                      fill="url(#tempHistGradient)" 
+                    <Area
+                      type="monotone"
+                      dataKey="temperature"
+                      stroke="#16A34A"
+                      fill="url(#tempHistGradient)"
                       strokeWidth={2}
                       name="Temperature (°C)"
                     />
@@ -484,27 +549,27 @@ export function AnalyticsPage() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <XAxis
+                      dataKey="date"
+                      stroke="#6B7280"
+                      fontSize={12}
                       tickFormatter={formatXAxis}
                       interval="preserveStartEnd"
                     />
-                    <YAxis 
-                      stroke="#6B7280" 
-                      fontSize={12} 
-                      label={{ value: '°C', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
+                      label={{ value: '°C', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
                     />
-                    <Area 
-                      type="monotone" 
-                      dataKey="temperature" 
-                      stroke="#86EFAC" 
-                      fill="url(#tempForeGradient)" 
+                    <Area
+                      type="monotone"
+                      dataKey="temperature"
+                      stroke="#86EFAC"
+                      fill="url(#tempForeGradient)"
                       strokeWidth={2}
                       strokeDasharray="5 5"
                       name="Temperature (°C)"
@@ -530,27 +595,27 @@ export function AnalyticsPage() {
                 <ResponsiveContainer width="100%" height={320}>
                   <BarChart data={historicalData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <XAxis
+                      dataKey="date"
+                      stroke="#6B7280"
+                      fontSize={12}
                       tickFormatter={formatXAxis}
                       interval="preserveStartEnd"
                     />
-                    <YAxis 
-                      stroke="#6B7280" 
-                      fontSize={12} 
-                      label={{ value: 'mm', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
+                      label={{ value: 'mm', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
                     />
-                    <Bar 
-                      dataKey="rainfall" 
-                      fill="#16A34A" 
-                      radius={[8, 8, 0, 0]} 
-                      name="Rainfall (mm)" 
+                    <Bar
+                      dataKey="rainfall"
+                      fill="#16A34A"
+                      radius={[8, 8, 0, 0]}
+                      name="Rainfall (mm)"
                     />
                   </BarChart>
                 </ResponsiveContainer>
@@ -569,26 +634,26 @@ export function AnalyticsPage() {
                 <ResponsiveContainer width="100%" height={320}>
                   <BarChart data={forecastData} key={forecastRange}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#6B7280" 
-                      fontSize={12} 
+                    <XAxis
+                      dataKey="date"
+                      stroke="#6B7280"
+                      fontSize={12}
                       tickFormatter={formatXAxis}
                       interval="preserveStartEnd"
                     />
-                    <YAxis 
-                      stroke="#6B7280" 
-                      fontSize={12} 
-                      label={{ value: 'mm', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }} 
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
+                      label={{ value: 'mm', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
                     />
-                    <Bar 
-                      dataKey="rainfall" 
-                      fill="#86EFAC" 
-                      radius={[8, 8, 0, 0]} 
+                    <Bar
+                      dataKey="rainfall"
+                      fill="#86EFAC"
+                      radius={[8, 8, 0, 0]}
                       name="Rainfall (mm)"
                     />
                   </BarChart>

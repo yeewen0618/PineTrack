@@ -34,25 +34,40 @@ export function ConfigurationPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl text-[#111827] mb-1">System Configuration</h2>
-        <p className="text-[#6B7280]">Manage thresholds, notifications, and system preferences</p>
+        <h2 className="text-[20px] text-[#111827]">System Configuration</h2>
+        <p className="text-[16px] text-[#374151]">Manage thresholds, notifications, and system preferences</p>
       </div>
 
       <Tabs defaultValue="thresholds" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 rounded-xl">
-          <TabsTrigger value="thresholds" className="rounded-lg gap-2">
+        <TabsList className="grid w-full grid-cols-3 rounded-xl bg-transparent">
+          <TabsTrigger
+            value="thresholds"
+            className="rounded-lg gap-2 data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8] transition"
+          >
             <Settings size={16} />
             Thresholds
           </TabsTrigger>
-          <TabsTrigger value="notifications" className="rounded-lg gap-2">
+
+          <TabsTrigger
+            value="notifications"
+            className="rounded-lg gap-2 data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8] transition"
+          >
             <Bell size={16} />
             Notifications
           </TabsTrigger>
-          <TabsTrigger value="system" className="rounded-lg gap-2">
+
+          <TabsTrigger
+            value="system"
+            className="rounded-lg gap-2 data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8] transition"
+          >
             <Database size={16} />
             System
           </TabsTrigger>
         </TabsList>
+
+
+
+
 
         {/* Thresholds Tab */}
         <TabsContent value="thresholds" className="mt-6 space-y-6">
@@ -260,7 +275,7 @@ export function ConfigurationPage() {
 
             <div className="flex gap-3 mt-6">
               <Button
-                className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl gap-2"
+                className="flex-1 bg-[#16A34A] hover:bg-[#16A34A] rounded-xl gap-2"
                 onClick={handleSaveThresholds}
               >
                 <Save size={16} />

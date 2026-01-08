@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -20,16 +20,39 @@ import {
   DialogTrigger
 } from '../components/ui/dialog';
 import { StatusBadge } from '../components/StatusBadge';
-import { mockPlots } from '../lib/mockData';
+import { createPlotWithPlan, listPlots } from '../lib/api';
+import type { Plot } from '../lib/api';
 import { Plus, Search, Edit, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { deletePlot } from "../lib/api";
+import { apiFetch } from "../lib/api";
+
+
 
 interface PlotManagementPageProps {
   onNavigate: (page: string, plotId?: string) => void;
 }
 
+const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+
+function calcHarvestProgressPercent(plantingDateISO: string, cycleDays = 420): number {
+  const start = new Date(plantingDateISO);
+  const now = new Date();
+
+  const diffMs = now.getTime() - start.getTime();
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+  const pct = (diffDays / cycleDays) * 100;
+  return Math.round(clamp(pct, 0, 100));
+}
+
+
+
+
 export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [plots, setPlots] = useState<Plot[]>([]);
+  const [loadingPlots, setLoadingPlots] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedPlot, setSelectedPlot] = useState<any>(null);
@@ -41,42 +64,102 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
     growthStage: 'Establishment'
   });
 
-  const filteredPlots = mockPlots.filter(
-    (plot) =>
-      plot.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      plot.cropType.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const handleAddPlot = (e: React.FormEvent) => {
-    e.preventDefault();
-    toast.success('Plot added successfully! Schedule auto-generated.');
-    setIsAddDialogOpen(false);
-    setFormData({ name: '', cropType: 'MD2 Pineapple', area: '', plantingDate: '', growthStage: 'Establishment' });
+  const loadPlots = async () => {
+    setLoadingPlots(true);
+    try {
+      const res = await listPlots();
+      setPlots(res.data);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to load plots');
+    } finally {
+      setLoadingPlots(false);
+    }
   };
+
+  useEffect(() => {
+    loadPlots();
+  }, []);
+
+  const filteredPlots = useMemo(() => {
+    return plots.filter(
+      (plot) =>
+        plot.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        plot.crop_type.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [plots, searchTerm]);
+
+  const handleAddPlot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await createPlotWithPlan({
+        name: formData.name,
+        crop_type: formData.cropType,
+        area_ha: Number(formData.area),
+        planting_date: formData.plantingDate,
+        growth_stage: formData.growthStage,
+      });
+      toast.success(`Plot created (${res.plot_id}). ${res.tasks_created} tasks generated.`);
+      setIsAddDialogOpen(false);
+      setFormData({ name: '', cropType: 'MD2 Pineapple', area: '', plantingDate: '', growthStage: 'Establishment' });
+      loadPlots();
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to create plot');
+    }
+  };
+
+  const handleDeletePlot = async (
+    plotId: string,
+    plotName: string,
+    e: React.MouseEvent<HTMLButtonElement>
+  ) => {
+    e.stopPropagation();
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${plotName}"?\n\nAll related tasks will also be removed.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await deletePlot(plotId);
+      toast.success(`Plot "${plotName}" deleted`);
+
+      // clear context if needed
+      if (sessionStorage.getItem("last_plot_id") === plotId) {
+        sessionStorage.removeItem("last_plot_id");
+      }
+
+      // refresh plot list
+      await loadPlots(); // ⬅️ your existing fetch function
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to delete plot");
+    }
+  };
+
 
   const handleEditClick = (plot: any, e: React.MouseEvent) => {
     e.stopPropagation();
     setSelectedPlot(plot);
     setFormData({
       name: plot.name,
-      cropType: plot.cropType,
-      area: plot.area.toString(),
-      plantingDate: plot.plantingDate,
-      growthStage: plot.growthStage
+      cropType: plot.crop_type,
+      area: String(plot.area_ha),
+      plantingDate: plot.planting_date,
+      growthStage: plot.growth_stage
     });
     setIsEditDialogOpen(true);
   };
 
   const handleEditPlot = (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success('Plot updated successfully!');
+    toast.success('Plot update is not implemented in backend (MVP).');
     setIsEditDialogOpen(false);
     setSelectedPlot(null);
     setFormData({ name: '', cropType: 'MD2 Pineapple', area: '', plantingDate: '', growthStage: 'Establishment' });
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-[#FAFFFE] to-[#EBF8EF] space-y-6">
+    <div className="space-y-6">
+      {/* Header directly on gradient */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-[20px] text-[#111827]">Plot Management</h2>
@@ -86,11 +169,13 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
         {/* Add New Plot Dialog */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-[#15803D] hover:bg-[#16A34A] rounded-xl gap-2">
+            <Button className="bg-[#16A34A] hover:bg-[#16A34A] rounded-xl gap-2">
               <Plus size={20} />
               Add New Plot
             </Button>
           </DialogTrigger>
+
+          {/* Add Plot dialog content */}
           <DialogContent className="rounded-[20px] p-8 shadow-[0_8px_20px_rgba(0,0,0,0.15)]">
             <DialogHeader>
               <DialogTitle className="text-[20px]">Add New Plot</DialogTitle>
@@ -98,6 +183,8 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 Enter plot details. A 14-month schedule will be auto-generated.
               </DialogDescription>
             </DialogHeader>
+
+
             <form onSubmit={handleAddPlot} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="plotName" className="text-[14px]">Plot Name</Label>
@@ -170,16 +257,18 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 </select>
               </div>
 
-              <div className="flex gap-3 pt-2">
+              <div className="flex justify-end gap-3 pt-4">
                 <Button
                   type="button"
-                  variant="ghost"
-                  className="flex-1 rounded-xl text-[14px]"
+                  variant="outline"
+                  className="rounded-xl"
                   onClick={() => setIsAddDialogOpen(false)}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl text-[14px]">
+                <Button
+                  type="submit"
+                  className="flex-1 bg-[#16A34A] hover:bg-[#16A34A] rounded-xl text-[14px]">
                   Add Plot
                 </Button>
               </div>
@@ -288,14 +377,16 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
 
       {/* Search and Filter */}
       <Card className="p-4 rounded-2xl bg-white shadow-sm">
-        <div className="flex items-center gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280]" size={18} />
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280]"
+              size={18} />
             <Input
               placeholder="Search plots by name or crop type..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 rounded-xl border-[#E5E7EB]"
+              className="pl-10 rounded-xl border-[#E5E7EB] focus:border-[#15803D] focus:ring-[#15803D]"
               aria-label="Search plots"
             />
           </div>
@@ -315,7 +406,7 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 <TableHead className="text-[14px]">Planting Date</TableHead>
                 <TableHead className="text-[14px]">Growth Stage</TableHead>
                 <TableHead className="text-[14px]">Status</TableHead>
-                <TableHead className="text-[14px]">Health</TableHead>
+                <TableHead className="text-[14px]">Progress</TableHead>
                 <TableHead className="text-right pr-8 text-[14px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -328,39 +419,42 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 >
                   <TableCell className="pl-8 font-medium text-[14px]">{plot.id}</TableCell>
                   <TableCell className="text-[14px]">{plot.name}</TableCell>
-                  <TableCell className="text-[14px]">{plot.cropType}</TableCell>
-                  <TableCell className="text-[14px]">{plot.area} ha</TableCell>
+                  <TableCell className="text-[14px]">{plot.crop_type}</TableCell>
+                  <TableCell className="text-[14px]">{plot.area_ha} ha</TableCell>
                   <TableCell className="text-[14px]">
-                    {new Date(plot.plantingDate).toLocaleDateString('en-US', {
+                    {new Date(plot.planting_date).toLocaleDateString('en-US', {
                       year: 'numeric',
                       month: 'short',
                       day: 'numeric'
                     })}
                   </TableCell>
-                  <TableCell className="text-[14px]">{plot.growthStage}</TableCell>
+                  <TableCell className="text-[14px]">{plot.growth_stage}</TableCell>
                   <TableCell>
                     <StatusBadge status={plot.status} />
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${plot.healthScore >= 80
-                            ? 'bg-[#16A34A]'
-                            : plot.healthScore >= 60
-                              ? 'bg-[#CA8A04]'
-                              : 'bg-[#DC2626]'
-                            }`}
-                          style={{ width: `${plot.healthScore}%` }}
-                          role="progressbar"
-                          aria-valuenow={plot.healthScore}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                        />
-                      </div>
-                      <span className="text-[14px]">{plot.healthScore}%</span>
-                    </div>
+                    {(() => {
+                      const progress = calcHarvestProgressPercent(plot.planting_date);
+
+                      return (
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-[#2563EB] rounded-full transition-all"
+                              style={{ width: `${Math.max(progress, 3)}%` }}
+                              role="progressbar"
+                              aria-valuenow={progress}
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                            />
+                          </div>
+                          <span className="text-[14px] text-[#374151]">{progress}%</span>
+                        </div>
+
+                      );
+                    })()}
                   </TableCell>
+
                   <TableCell className="text-right pr-8">
                     <div className="flex justify-end gap-2">
                       <Button
@@ -378,10 +472,7 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                         variant="ghost"
                         size="icon"
                         className="rounded-lg text-[#DC2626] hover:text-[#991B1B] hover:bg-red-50 transition-colors"
-                        onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                          e.stopPropagation();
-                          toast.error("Delete plot feature");
-                        }}
+                        onClick={(e) => handleDeletePlot(plot.id, plot.name, e)}
                         aria-label={`Delete ${plot.name}`}
                       >
                         <Trash2 size={16} />
@@ -396,27 +487,32 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
       </Card>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <Card className="rounded-2xl bg-white shadow-sm p-4">
           <p className="text-[14px] text-[#6B7280] mb-1">Total Plots</p>
-          <p className="text-[20px] text-[#111827]">{mockPlots.length}</p>
+          <p className="text-[20px] text-[#111827]">{plots.length}</p>
         </Card>
-        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+        <Card className="rounded-2xl bg-white shadow-sm p-4">
           <p className="text-[14px] text-[#6B7280] mb-1">Total Area</p>
           <p className="text-[20px] text-[#111827]">
-            {mockPlots.reduce((sum, plot) => sum + plot.area, 0).toFixed(1)} ha
+            {plots.reduce((sum, plot) => sum + (plot.area_ha ?? 0), 0).toFixed(1)} ha
           </p>
         </Card>
-        <Card className="p-5 rounded-2xl bg-white shadow-sm">
-          <p className="text-[14px] text-[#6B7280] mb-1">Avg Health Score</p>
+        <Card className="rounded-2xl bg-white shadow-sm p-4">
+          <p className="text-[14px] text-[#6B7280] mb-1">Avg Progress</p>
           <p className="text-[20px] text-[#111827]">
-            {Math.round(mockPlots.reduce((sum, plot) => sum + plot.healthScore, 0) / mockPlots.length)}%
+            {plots.length === 0
+              ? "—"
+              : `${Math.round(
+                plots.reduce((sum, plot) => sum + calcHarvestProgressPercent(plot.planting_date), 0) /
+                plots.length,
+              )}%`}
           </p>
         </Card>
-        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+        <Card className="rounded-2xl bg-white shadow-sm p-4">
           <p className="text-[14px] text-[#6B7280] mb-1">Active Issues</p>
           <p className="text-[20px] text-[#111827]">
-            {mockPlots.filter((p) => p.status === 'Stop' || p.status === 'Pending').length}
+            {plots.filter((p) => p.status === 'Stop' || p.status === 'Pending').length}
           </p>
         </Card>
       </div>

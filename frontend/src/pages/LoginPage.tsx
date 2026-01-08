@@ -5,37 +5,65 @@ import { Label } from '../components/ui/label';
 import { Card } from '../components/ui/card';
 import { Sprout, Mail, Lock } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
+import { login } from "../lib/api";
+
 
 interface LoginPageProps {
-  onLogin: () => void;
+  onLogin: () => void; // callback when login succeeds
 }
 
 export function LoginPage({ onLogin }: LoginPageProps) {
-  const [email, setEmail] = useState('');
+  // Local state for email, password, error message, and loading flag
+  // const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+  // Handle form submission
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault(); // prevent page refresh
+    setError(''); // clear previous error
 
-    if (!email || !password) {
+    // Simple validation: require both fields
+    if (!username || !password) {
       setError('Please enter both email and password');
       return;
     }
 
     setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      setLoading(false);
+
+    try {
+      const res = await fetch('http://127.0.0.1:5001/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || 'Invalid credentials');
+      }
+
+      const data = await res.json(); // { access_token, token_type }
+      console.log(data);
+      sessionStorage.setItem("access_token", data.access_token);
+      // optional: wipe any old persistent token
+      localStorage.removeItem("access_token");
+
+
       onLogin();
-    }, 1000);
+    } catch (err: any) {
+      setError('Login failed. Please check username/password.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
+    // Full-screen container, centered horizontally and vertically
+    <div className="min-h-screen w-screen flex items-center justify-center p-4">
+      {/* Limit the max width of the login card */}
       <div className="w-full max-w-md">
         {/* Logo and Title */}
         <div className="text-center mb-8">
@@ -59,9 +87,10 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               </Alert>
             )}
 
+            {/* Email input field */}
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-[#111827]">
-                Email Address
+              <Label htmlFor="username" className="text-[#111827]">
+                Username
               </Label>
               <div className="relative">
                 <Mail
@@ -69,17 +98,18 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   size={18}
                 />
                 <Input
-                  id="email"
-                  type="email"
-                  placeholder="Enter your email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="username"
+                  type="username"
+                  placeholder="Enter your username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                   className="pl-10 h-12 rounded-xl border-[#E5E7EB] focus:border-[#15803D] focus:ring-[#15803D]"
                   aria-required="true"
                 />
               </div>
             </div>
 
+            {/* Password input field */}
             <div className="space-y-2">
               <Label htmlFor="password" className="text-[#111827]">
                 Password
@@ -101,6 +131,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               </div>
             </div>
 
+            {/* Remember me + Forgot password row */}
             <div className="flex items-center justify-between text-sm">
               <label className="flex items-center gap-2 text-[#6B7280] cursor-pointer">
                 <input
@@ -118,6 +149,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               </a>
             </div>
 
+            {/* Submit button */}
             <Button
               type="submit"
               className="w-full h-12 bg-[#15803D] hover:bg-[#16A34A] text-white rounded-xl"
@@ -127,8 +159,9 @@ export function LoginPage({ onLogin }: LoginPageProps) {
             </Button>
           </form>
 
+          {/* Demo info text */}
           <div className="mt-6 text-center text-sm text-[#6B7280]">
-            Demo credentials: Any email/password combination
+            Demo credentials: admin / 123456
           </div>
         </Card>
 
