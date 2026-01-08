@@ -190,3 +190,47 @@ export async function rejectReschedule(taskId: string) {
     } as Task,
   } as { ok: true; data: Task };
 }
+
+export async function getAnalyticsHistory(days: number = 30) {
+  const res = await fetch(`${API_BASE}/analytics/history?days=${days}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      // Add Authorization header if needed later
+      // "Authorization": `Bearer ${token}` 
+    }
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to fetch historical data");
+  }
+
+  return res.json();
+}
+
+export async function getAnalyticsForecast(days: number = 7) {
+  // Map friendly strings to integers if passed (e.g. '1W' -> 7 handled in component, or here)
+  // For now expecting integer
+  const res = await fetch(`${API_BASE}/analytics/forecast?days=${days}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    }
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to fetch forecast data");
+  }
+
+  return res.json();
+}
+
+export async function getRecommendations(deviceId: number = 205) {
+  const res = await fetch(`${API_BASE}/analytics/recommendations?device_id=${deviceId}`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" }
+  });
+
+  if (!res.ok) throw new Error("Failed to fetch recommendations");
+  return res.json();
+}

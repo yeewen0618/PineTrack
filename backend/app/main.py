@@ -12,6 +12,7 @@ Frontend communicates with this file via HTTP requests.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.auth import router as auth_router
+from app.routers.analytics import router as analytics_router
 from app.core.supabase_client import supabase
 from app.routers.test import router as test_router
 from app.routers.workers import router as workers_router
@@ -31,6 +32,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(analytics_router)
 
 @app.get("/api/health")
 def health():
