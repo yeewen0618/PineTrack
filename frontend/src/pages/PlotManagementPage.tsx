@@ -25,6 +25,8 @@ import type { Plot } from '../lib/api';
 import { Plus, Search, Edit, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePlot } from "../lib/api";
+import { apiFetch } from "../lib/api";
+
 
 
 interface PlotManagementPageProps {

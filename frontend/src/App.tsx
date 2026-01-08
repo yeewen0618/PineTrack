@@ -55,8 +55,16 @@ export default function App() {
 
   // keep your existing API: onNavigate(page, plotId?)
   const onNavigate = (page: string, plotId?: string) => {
-    const lastPlotId =
+    const rawPlotId =
       plotId ?? sessionStorage.getItem("last_plot_id") ?? undefined;
+    const lastPlotId =
+      rawPlotId == null || String(rawPlotId).trim() === ""
+        ? undefined
+        : String(rawPlotId);
+
+    if (plotId != null && String(plotId).trim() !== "") {
+      sessionStorage.setItem("last_plot_id", String(plotId));
+    }
 
     switch (page) {
       case "dashboard":
@@ -66,7 +74,9 @@ export default function App() {
       case "plots":
         return navigate("/plots");
       case "plot-details":
-        return lastPlotId ? navigate(`/plots/${lastPlotId}`) : navigate("/plots");
+        return lastPlotId
+          ? navigate(`/plots/${encodeURIComponent(lastPlotId)}`)
+          : navigate("/plots");
       case "schedule":
         return navigate("/schedule");
       case "reschedule":
@@ -86,8 +96,6 @@ export default function App() {
       default:
         return navigate("/dashboard");
     }
-    console.log("onNavigate:", page);
-
   };
 
   return (

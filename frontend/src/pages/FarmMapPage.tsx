@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "../components/ui/card";
 import { MapPin, Info } from "lucide-react";
 import { toast } from "sonner";
-
 import { listPlots } from "../lib/api";
 import type { Plot } from "../lib/api";
 import { calcHarvestProgressPercent } from "../lib/progress";
+import { FarmSatelliteMap } from "../components/FarmSatelliteMap";
 
 interface FarmMapPageProps {
   onNavigate: (page: string, plotId?: string) => void;
@@ -33,6 +34,7 @@ function clamp(n: number, min: number, max: number) {
 export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
   const [plots, setPlots] = useState<Plot[]>([]);
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const loadPlots = async () => {
@@ -51,17 +53,33 @@ export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
 
   const plotsVM: PlotVM[] = useMemo(() => {
     return (plots ?? []).map((p) => {
-      const x = toNumber((p as any).location_x);
-      const y = toNumber((p as any).location_y);
+      const x = toNumber(p.location_x);
+      const y = toNumber(p.location_y);
 
       return {
         ...p,
         gridX: x === null ? null : Math.round(x),
         gridY: y === null ? null : Math.round(y),
-        progressPercent: clamp(calcHarvestProgressPercent((p as any).planting_date), 0, 100),
+        progressPercent: clamp(calcHarvestProgressPercent(p.planting_date), 0, 100),
       };
     });
   }, [plots]);
+
+  const plotMarkers = useMemo(() => {
+    return (plots ?? [])
+      .map((plot) => {
+        const lng = toNumber(plot.location_x);
+        const lat = toNumber(plot.location_y);
+        if (lng === null || lat === null) return null;
+        return { id: plot.id, name: plot.name, lng, lat };
+      })
+      .filter((plot): plot is { id: string; name: string; lng: number; lat: number } => Boolean(plot));
+  }, [plots]);
+
+  const mapCenter = useMemo(() => {
+    if (plotMarkers.length === 0) return undefined;
+    return { lng: plotMarkers[0].lng, lat: plotMarkers[0].lat };
+  }, [plotMarkers]);
 
   // Only plots with usable grid coordinates
   const mappable = useMemo(
@@ -78,6 +96,12 @@ export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
     if (mappable.length === 0) return 1;
     return Math.max(...mappable.map((p) => p.gridY as number));
   }, [mappable]);
+
+  const useCompactLayout = useMemo(() => {
+    if (mappable.length === 0) return false;
+    const maxCells = maxX * maxY;
+    return mappable.length > 8 || maxCells > 20 || maxX > 6 || maxY > 6;
+  }, [mappable.length, maxX, maxY]);
 
   const getStatusColor = (status: Plot["status"]) => {
     switch (status) {
@@ -124,6 +148,14 @@ export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
         </div>
       </Card>
 
+      <Card className="p-4 rounded-2xl bg-white">
+        <FarmSatelliteMap
+          center={mapCenter}
+          plots={plotMarkers}
+          onPlotClick={(plotId) => navigate(`/plots/${plotId}`)}
+        />
+      </Card>
+
       {/* Map Grid */}
       <Card className="p-8 rounded-2xl bg-white">
         {loading && (
@@ -141,18 +173,26 @@ export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
           <div
             className="grid gap-4"
             style={{
-              gridTemplateColumns: `repeat(${maxX}, minmax(200px, 1fr))`,
-              gridTemplateRows: `repeat(${maxY}, minmax(200px, 1fr))`,
+              ...(useCompactLayout
+                ? { gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }
+                : {
+                    gridTemplateColumns: `repeat(${maxX}, minmax(200px, 1fr))`,
+                    gridTemplateRows: `repeat(${maxY}, minmax(200px, 1fr))`,
+                  }),
             }}
           >
             {mappable.map((plot) => (
               <div
                 key={plot.id}
                 className={`${getStatusColor(plot.status)} rounded-2xl p-6 text-white cursor-pointer transition-all transform hover:scale-105 shadow-lg`}
-                style={{
-                  gridColumn: plot.gridX as number,
-                  gridRow: plot.gridY as number,
-                }}
+                style={
+                  useCompactLayout
+                    ? undefined
+                    : {
+                        gridColumn: plot.gridX as number,
+                        gridRow: plot.gridY as number,
+                      }
+                }
                 onClick={() => onNavigate("plot-details", plot.id)}
                 role="button"
                 tabIndex={0}

@@ -84,7 +84,16 @@ export type Task = {
 
 // ---------- Plots ----------
 export async function listPlots() {
-  return apiFetch<{ ok: true; data: Plot[] }>("/api/plots");
+  const res = await apiFetch<{ ok: true; data: any[] }>("/api/plots");
+  const normalized = (res.data ?? []).map((plot) => {
+    const rawId = plot?.id ?? plot?.plot_id;
+    return {
+      ...plot,
+      id: rawId == null ? "" : String(rawId),
+    } as Plot;
+  });
+
+  return { ...res, data: normalized };
 }
 
 export async function createPlotWithPlan(payload: {
@@ -111,7 +120,8 @@ export async function createPlotWithPlan(payload: {
  */
 export async function getPlotById(plotId: string): Promise<Plot> {
   const res = await listPlots();
-  const plot = res.data.find((p) => p.id === plotId);
+  const targetId = String(plotId);
+  const plot = res.data.find((p) => String(p.id) === targetId);
   if (!plot) throw new Error("Plot not found");
   return plot;
 }

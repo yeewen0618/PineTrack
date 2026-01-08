@@ -34,6 +34,8 @@ import { ForecastFilter } from '../components/ForecastFilter';
 import { getPlotById, getTasksByPlotId } from "../lib/api";
 import type { Plot, Task } from "../lib/api";
 import { calcHarvestProgressPercent } from '../lib/progress';
+import { apiFetch } from "../lib/api";
+import { listTasks } from '../lib/api';
 
 type PlotDetailsPageProps = {
   onNavigate: (page: string, plotId?: string) => void;
@@ -76,9 +78,9 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
     const load = async () => {
       setLoading(true);
       try {
-        // ✅ Plot details from DB
-        const plotRes = await apiFetch<{ ok: true; data: Plot }>(`/api/plots/${id}`);
-        setPlot(plotRes.data);
+        // ✅ Use the helper function from api.ts
+        const plotData = await getPlotById(id);
+        setPlot(plotData);
 
         // ✅ Tasks from DB (plot filtered)
         const tasksRes = await listTasks({ plot_id: id });
@@ -107,13 +109,11 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
 
   // ✅ normalize tasks to the format your UI expects
   // If your UI expects fields like `date` + `status`, map here.
-  const uiTasks = useMemo(() => {
-    return tasks.map((t: any) => ({
-      ...t,
-      date: t.task_date,
-      status: t.decision ?? t.status, // supports both until all pages migrated
-    }));
-  }, [tasks]);
+  const uiTasks = tasks.map((t: any) => ({
+    ...t,
+    date: t.task_date,
+    status: t.decision ?? t.status, // supports both until all pages migrated
+  }));
 
   // Generate calendar for current month (November 2025)
   const year = TODAY.getFullYear();
@@ -204,7 +204,7 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
               <p className="text-[18px] text-[#111827]">{progress}%</p>
               <div className="flex-1 h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
                 <div
-                  className={`h-full rounded-full ${progress >= 80 ? 'bg-[#16A34A]' : progress >= 60 ? 'bg-[#CA8A04]' : 'bg-[#DC2626]'
+                  className={`h-full rounded-full ${progress >= 80 ? 'bg-[#2563eb]' : progress >= 60 ? 'bg-[#2563eb]' : 'bg-[#2563eb]'
                     }`}
                   style={{ width: `${progress}%` }}
                   role="progressbar"
@@ -768,3 +768,4 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
     </div>
   );
 }
+
