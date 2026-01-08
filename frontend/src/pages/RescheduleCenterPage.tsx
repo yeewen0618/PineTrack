@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { StatusBadge } from '../components/StatusBadge';
@@ -10,19 +10,46 @@ import {
   TableHeader,
   TableRow
 } from '../components/ui/table';
-import { mockTasks } from '../lib/mockData';
+import { approveReschedule, listPlots, listRescheduleProposals, rejectReschedule} from '../lib/api';
+import type { Task } from '../lib/api';
 import { CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function RescheduleCenterPage() {
-  const rescheduleTasks = mockTasks.filter((task) => task.proposedDate);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [plotNameMap, setPlotNameMap] = useState<Record<string, string>>({});
+  const rescheduleTasks = useMemo(() => tasks.filter((t) => t.proposed_date), [tasks]);
 
-  const handleApprove = (taskId: string) => {
-    toast.success('Reschedule approved and applied');
+  const loadData = async () => {
+    const [plotsRes, tasksRes] = await Promise.all([listPlots(), listRescheduleProposals()]);
+    const map: Record<string, string> = {};
+    for (const p of plotsRes.data) map[p.id] = p.name;
+    setPlotNameMap(map);
+    setTasks(tasksRes.data);
   };
 
-  const handleReject = (taskId: string) => {
-    toast.error('Reschedule rejected - original date maintained');
+  useEffect(() => {
+    loadData().catch((e) => toast.error(e.message ?? 'Failed to load reschedule proposals'));
+  }, []);
+
+  const handleApprove = async (taskId: string) => {
+    try {
+      await approveReschedule(taskId);
+      toast.success('Reschedule approved and applied');
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message ?? 'Approve failed');
+    }
+  };
+
+  const handleReject = async (taskId: string) => {
+    try {
+      await rejectReschedule(taskId);
+      toast.success('Reschedule rejected - original date maintained');
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message ?? 'Reject failed');
+    }
   };
 
   return (
@@ -53,7 +80,7 @@ export function RescheduleCenterPage() {
             <div>
               <p className="text-[14px] text-[#6B7280]">Stop Status</p>
               <p className="text-[20px] text-[#111827]">
-                {rescheduleTasks.filter((t) => t.status === 'Stop').length}
+                {rescheduleTasks.filter((t) => t.decision === 'Stop').length}
               </p>
             </div>
           </div>
@@ -68,7 +95,7 @@ export function RescheduleCenterPage() {
             <div>
               <p className="text-[14px] text-[#6B7280]">Pending Status</p>
               <p className="text-[20px] text-[#111827]">
-                {rescheduleTasks.filter((t) => t.status === 'Pending').length}
+                {rescheduleTasks.filter((t) => t.decision === 'Pending').length}
               </p>
             </div>
           </div>
@@ -115,26 +142,26 @@ export function RescheduleCenterPage() {
                     key={task.id} 
                     className="hover:bg-[#F0FDF4] transition-colors border-b border-[#E5E7EB]"
                   >
-                    <TableCell className="pl-8 font-medium text-[14px]">{task.plotName}</TableCell>
+                    <TableCell className="pl-8 font-medium text-[14px]">{plotNameMap[task.plot_id] ?? task.plot_id}</TableCell>
                     <TableCell className="text-[14px]">{task.title}</TableCell>
                     <TableCell className="text-[14px]">
-                      {task.originalDate &&
-                        new Date(task.originalDate).toLocaleDateString('en-US', {
+                      {task.original_date &&
+                        new Date(task.original_date).toLocaleDateString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric'
                         })}
                     </TableCell>
                     <TableCell className="font-medium text-[#15803D] text-[14px]">
-                      {task.proposedDate &&
-                        new Date(task.proposedDate).toLocaleDateString('en-US', {
+                      {task.proposed_date &&
+                        new Date(task.proposed_date).toLocaleDateString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric'
                         })}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={task.status} />
+                      <StatusBadge status={task.decision} />
                     </TableCell>
                     <TableCell>
                       <p className="text-[14px] text-[#6B7280] max-w-xs">{task.reason}</p>

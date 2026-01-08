@@ -1,78 +1,68 @@
-import React from 'react';
-import { Card } from './ui/card';
-import { StatusBadge } from './StatusBadge';
-import { MapPin, Activity } from 'lucide-react';
-import type { Plot } from '../lib/mockData';
+import React from "react";
+import { Card } from "./ui/card";
+import { StatusBadge } from "./StatusBadge";
+import type { Plot } from "../lib/api";
 
 interface PlotCardProps {
   plot: Plot;
+  progressPercent: number;
   onClick?: () => void;
 }
 
-export function PlotCard({ plot, onClick }: PlotCardProps) {
-  const statusColor = {
-    Proceed: 'border-l-[#16A34A]',
-    Pending: 'border-l-[#CA8A04]',
-    Stop: 'border-l-[#DC2626]'
-  };
+const getAccentClass = (status?: string) => {
+  switch (status) {
+    case "Proceed":
+      return "border-l-[#16A34A]"; // green
+    case "Pending":
+      return "border-l-[#CA8A04]"; // amber
+    case "Stop":
+      return "border-l-[#DC2626]"; // red
+    default:
+      return "border-l-[#E5E7EB]";
+  }
+};
 
+export function PlotCard({ plot, progressPercent, onClick }: PlotCardProps) {
   return (
     <Card
-      className={`p-5 cursor-pointer hover:shadow-lg transition-all border-l-4 ${
-        statusColor[plot.status]
-      } rounded-2xl bg-white`}
       onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          onClick?.();
-        }
-      }}
-      aria-label={`View details for ${plot.name}`}
+      className={`p-5 rounded-2xl bg-white cursor-pointer hover:shadow-md transition
+        border-l-4 ${getAccentClass(plot.status)}
+      `}
     >
-      <div className="flex justify-between items-start mb-3">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-3">
         <div>
-          <h3 className="text-[#111827]">{plot.name}</h3>
-          <p className="text-sm text-[#6B7280]">{plot.cropType}</p>
+          <p className="text-xs text-[#6B7280]">{plot.id}</p>
+          <h4 className="text-[#111827]">{plot.name}</h4>
+          <p className="text-sm text-[#6B7280]">{plot.crop_type}</p>
         </div>
         <StatusBadge status={plot.status} size="sm" />
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-sm text-[#6B7280]">
-          <MapPin size={14} />
-          <span>{plot.area} hectares</span>
+      {/* Meta */}
+      <div className="grid grid-cols-2 gap-4 text-sm mb-4">
+        <div>
+          <p className="text-[#6B7280]">Area</p>
+          <p className="text-[#111827]">{plot.area_ha} ha</p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-[#6B7280]">
-          <Activity size={14} />
-          <span>{plot.growthStage}</span>
+        <div>
+          <p className="text-[#6B7280]">Growth Stage</p>
+          <p className="text-[#111827]">{plot.growth_stage}</p>
         </div>
       </div>
 
-      <div className="mt-4 pt-4 border-t border-[#E5E7EB]">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-[#6B7280]">Health Score</span>
-          <div className="flex items-center gap-2">
-            <div className="w-24 h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full ${
-                  plot.healthScore >= 80
-                    ? 'bg-[#16A34A]'
-                    : plot.healthScore >= 60
-                    ? 'bg-[#CA8A04]'
-                    : 'bg-[#DC2626]'
-                }`}
-                style={{ width: `${plot.healthScore}%` }}
-                role="progressbar"
-                aria-valuenow={plot.healthScore}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label={`Health score ${plot.healthScore}%`}
-              />
-            </div>
-            <span className="text-sm text-[#111827]">{plot.healthScore}%</span>
-          </div>
+      {/* Progress (same logic as Plot Management) */}
+      <div>
+        <div className="flex justify-between text-sm mb-1">
+          <span className="text-[#6B7280]">Progress</span>
+          <span className="text-[#111827]">{progressPercent}%</span>
+        </div>
+        <div className="w-full h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
+          <div
+            className="h-full bg-[#3B82F6] rounded-full transition-all"
+            style={{ width: `${Math.max(progressPercent, 3)}%` }}
+          />
         </div>
       </div>
     </Card>

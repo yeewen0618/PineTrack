@@ -34,7 +34,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     setLoading(true);
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/auth/login', {
+      const res = await fetch('http://127.0.0.1:5001/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -46,7 +46,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       }
 
       const data = await res.json(); // { access_token, token_type }
-      localStorage.setItem('access_token', data.access_token);
+      console.log(data);
+      sessionStorage.setItem("access_token", data.access_token);
+      // optional: wipe any old persistent token
+      localStorage.removeItem("access_token");
+
 
       onLogin();
     } catch (err: any) {

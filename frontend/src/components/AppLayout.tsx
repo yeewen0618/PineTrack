@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Outlet } from "react-router-dom";
 import {
   LayoutDashboard,
   Map,
@@ -17,12 +18,12 @@ import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 
 interface AppLayoutProps {
-  children: React.ReactNode;
   currentPage: string;
   onNavigate: (page: string) => void;
 }
 
-export function AppLayout({ children, currentPage, onNavigate }: AppLayoutProps) {
+
+export function AppLayout({ currentPage, onNavigate }: AppLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const menuItems = [
@@ -41,9 +42,8 @@ export function AppLayout({ children, currentPage, onNavigate }: AppLayoutProps)
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
       <aside
-        className={`${
-          sidebarOpen ? 'w-64' : 'w-0'
-        } bg-white border-r border-[#E5E7EB] flex-shrink-0 transition-all duration-300 overflow-hidden`}
+        className={`${sidebarOpen ? 'w-64' : 'w-0'
+          } bg-white border-r border-[#E5E7EB] flex-shrink-0 transition-all duration-300 overflow-hidden`}
         role="navigation"
         aria-label="Main navigation"
       >
@@ -70,11 +70,10 @@ export function AppLayout({ children, currentPage, onNavigate }: AppLayoutProps)
                     <li key={item.id}>
                       <Button
                         variant="ghost"
-                        className={`w-full justify-start gap-3 h-11 rounded-xl ${
-                          isActive
+                        className={`w-full justify-start gap-3 h-11 rounded-xl ${isActive
                             ? 'bg-[#DCFCE7] text-[#15803D] hover:bg-[#DCFCE7]'
                             : 'text-[#6B7280] hover:bg-[#F9FAFB] hover:text-[#111827]'
-                        }`}
+                          }`}
                         onClick={() => onNavigate(item.id)}
                         aria-current={isActive ? 'page' : undefined}
                       >
@@ -137,7 +136,9 @@ export function AppLayout({ children, currentPage, onNavigate }: AppLayoutProps)
 
         {/* Page Content */}
         <main className="flex-1 overflow-auto">
-          <div className="p-8 lg:p-10 space-y-8">{children}</div>
+          <div className="p-8 lg:p-10 space-y-8">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

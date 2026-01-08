@@ -14,6 +14,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers.auth import router as auth_router
 from app.routers.analytics import router as analytics_router
 from app.core.supabase_client import supabase
+from app.routers.test import router as test_router
+from app.routers.workers import router as workers_router
+from app.routers import schedule
+from app.routers import plots
+from app.routers import tasks
 
 
 app = FastAPI(title="PineTrack Backend")
@@ -42,3 +47,9 @@ def db_test():
         "count": len(res.data or []),
         "sample": res.data
     }
+
+app.include_router(test_router)
+app.include_router(workers_router)
+app.include_router(schedule.router)
+app.include_router(plots.router)
+app.include_router(tasks.router)

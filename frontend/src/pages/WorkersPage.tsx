@@ -16,6 +16,7 @@ import { mockWorkers, mockPlots, mockTasks } from '../lib/mockData';
 import { Plus, Search, Phone, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect } from "react";
+import { apiFetch } from "../lib/api";
 
 export function WorkersPage() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -26,23 +27,21 @@ export function WorkersPage() {
     contact: ''
   });
 
-  // useEffect(() => {
-  //   fetch("http://127.0.0.1:5000/api/health")
-  //     .then(res => res.json())
-  //     .then(data => console.log(data));
-  // }, []);
-
-  // return (
-  //   <div>
-  //     Workers Page
-  //   </div>
-  // );
+  useEffect(() => {
+    apiFetch<{ status: string; rows: any[] }>("/api/db-test")
+      .then((data) => {
+        console.log("DB TEST RESULT:", data);
+      })
+      .catch((err) => {
+        console.error("DB TEST ERROR:", err.message);
+      });
+  }, [])
 
   // Fix: Ensure mockWorkers is always an array
   const filteredWorkers = Array.isArray(mockWorkers)
     ? mockWorkers.filter((worker) =>
-        worker.name.toLowerCase().includes(searchTerm.toLowerCase())
-      )
+      worker.name.toLowerCase().includes(searchTerm.toLowerCase())
+    )
     : [];
 
   const handleAddWorker = (e: React.FormEvent) => {
