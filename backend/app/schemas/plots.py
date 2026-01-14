@@ -10,3 +10,10 @@ class CreatePlotWithPlanRequest(BaseModel):
     growth_stage: str
     location_x: Optional[float] = None
     location_y: Optional[float] = None
+
+
+class UpdatePlotRequest(BaseModel):
+    name: Optional[str] = None
+    area_ha: Optional[float] = None
+    crop_type: Optional[str] = None
+    planting_date: Optional[date] = None

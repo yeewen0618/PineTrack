@@ -69,3 +69,95 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  body {
+    background: #ffffff;
+    color: #111827;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .report-print-page,
+  .report-print-page * {
+    visibility: visible;
+  }
+
+  .report-print-page {
+    position: relative;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+
+  aside,
+  header {
+    display: none !important;
+  }
+
+  main {
+    overflow: visible !important;
+  }
+
+  main > div {
+    padding: 24px !important;
+  }
+
+  .print-only {
+    display: flex !important;
+  }
+
+  .print-hidden,
+  .report-print-controls {
+    display: none !important;
+  }
+
+  .report-print-page {
+    gap: 16px !important;
+  }
+
+  .report-print-header {
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .report-print-card {
+    border: 1px solid #e5e7eb !important;
+    border-radius: 12px !important;
+    box-shadow: none !important;
+  }
+
+  .report-print-card table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .report-print-card th,
+  .report-print-card td {
+    border-bottom: 1px solid #e5e7eb;
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .report-print-card th {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: #6b7280;
+  }
+
+  body[data-report-print="plot"] .report-print-worker {
+    display: none !important;
+  }
+
+  body[data-report-print="worker"] .report-print-plot {
+    display: none !important;
+  }
+}

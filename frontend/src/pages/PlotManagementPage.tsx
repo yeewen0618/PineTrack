@@ -20,7 +20,7 @@ import {
   DialogTrigger
 } from '../components/ui/dialog';
 import { StatusBadge } from '../components/StatusBadge';
-import { createPlotWithPlan, listPlots } from '../lib/api';
+import { createPlotWithPlan, listPlots, updatePlot } from '../lib/api';
 import type { Plot } from '../lib/api';
 import { Plus, Search, Edit, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -56,19 +56,32 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedPlot, setSelectedPlot] = useState<any>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const defaultGrowthStage = 'Establishment';
   const [formData, setFormData] = useState({
     name: '',
     cropType: 'MD2 Pineapple',
     area: '',
-    plantingDate: '',
-    growthStage: 'Establishment'
+    plantingDate: ''
   });
 
   const loadPlots = async () => {
     setLoadingPlots(true);
     try {
       const res = await listPlots();
-      setPlots(res.data);
+      // Sort by created_at (oldest first) so newly added plots land at the bottom.
+      const sortedPlots = (res.data ?? []).slice().sort((a, b) => {
+        const aTime = Date.parse(a.created_at ?? "");
+        const bTime = Date.parse(b.created_at ?? "");
+
+        if (Number.isFinite(aTime) && Number.isFinite(bTime)) {
+          return aTime - bTime;
+        }
+
+        return String(a.id).localeCompare(String(b.id));
+      });
+
+      setPlots(sortedPlots);
     } catch (e: any) {
       toast.error(e.message ?? 'Failed to load plots');
     } finally {
@@ -96,11 +109,11 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
         crop_type: formData.cropType,
         area_ha: Number(formData.area),
         planting_date: formData.plantingDate,
-        growth_stage: formData.growthStage,
+        growth_stage: defaultGrowthStage,
       });
       toast.success(`Plot created (${res.plot_id}). ${res.tasks_created} tasks generated.`);
       setIsAddDialogOpen(false);
-      setFormData({ name: '', cropType: 'MD2 Pineapple', area: '', plantingDate: '', growthStage: 'Establishment' });
+      setFormData({ name: '', cropType: 'MD2 Pineapple', area: '', plantingDate: '' });
       loadPlots();
     } catch (e: any) {
       toast.error(e.message ?? 'Failed to create plot');
@@ -143,18 +156,43 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
       name: plot.name,
       cropType: plot.crop_type,
       area: String(plot.area_ha),
-      plantingDate: plot.planting_date,
-      growthStage: plot.growth_stage
+      plantingDate: plot.planting_date
     });
     setIsEditDialogOpen(true);
   };
 
-  const handleEditPlot = (e: React.FormEvent) => {
+  const handleEditPlot = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success('Plot update is not implemented in backend (MVP).');
-    setIsEditDialogOpen(false);
-    setSelectedPlot(null);
-    setFormData({ name: '', cropType: 'MD2 Pineapple', area: '', plantingDate: '', growthStage: 'Establishment' });
+    if (!selectedPlot?.id) {
+      toast.error('No plot selected for update.');
+      return;
+    }
+
+    if (!formData.name || !formData.area || !formData.plantingDate) {
+      toast.error('Please fill in all required fields.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await updatePlot(selectedPlot.id, {
+        name: formData.name,
+        crop_type: formData.cropType,
+        area_ha: Number(formData.area),
+        planting_date: formData.plantingDate,
+      });
+
+      toast.success('Plot updated successfully.');
+      setIsEditDialogOpen(false);
+      setSelectedPlot(null);
+      setFormData({ name: '', cropType: 'MD2 Pineapple', area: '', plantingDate: '' });
+      await loadPlots();
+    } catch (err: any) {
+      console.error('Failed to update plot:', err);
+      toast.error(err?.message ?? 'Failed to update plot');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -239,24 +277,6 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="growthStage" className="text-[14px]">Growth Stage</Label>
-                <select
-                  id="growthStage"
-                  value={formData.growthStage}
-                  onChange={(e) => setFormData({ ...formData, growthStage: e.target.value })}
-                  className="w-full h-10 px-3 rounded-xl border border-[#E5E7EB] bg-white text-[#111827] text-[14px] focus:border-[#15803D] focus:ring-[#15803D] focus:outline-none"
-                  required
-                >
-                  <option>Establishment</option>
-                  <option>Early Growth</option>
-                  <option>Vegetative</option>
-                  <option>Flowering</option>
-                  <option>Fruiting</option>
-                  <option>Mature</option>
-                </select>
-              </div>
-
               <div className="flex justify-end gap-3 pt-4">
                 <Button
                   type="button"
@@ -339,24 +359,6 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="editGrowthStage" className="text-[14px]">Growth Stage</Label>
-                <select
-                  id="editGrowthStage"
-                  value={formData.growthStage}
-                  onChange={(e) => setFormData({ ...formData, growthStage: e.target.value })}
-                  className="w-full h-10 px-3 rounded-xl border border-[#E5E7EB] bg-white text-[#111827] text-[14px] focus:border-[#15803D] focus:ring-[#15803D] focus:outline-none"
-                  required
-                >
-                  <option>Establishment</option>
-                  <option>Early Growth</option>
-                  <option>Vegetative</option>
-                  <option>Flowering</option>
-                  <option>Fruiting</option>
-                  <option>Mature</option>
-                </select>
-              </div>
-
               <div className="flex gap-3 pt-2">
                 <Button
                   type="button"
@@ -366,8 +368,12 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl text-[14px]">
-                  Save Changes
+                <Button
+                  type="submit"
+                  className="flex-1 bg-[#15803D] hover:bg-[#16A34A] rounded-xl text-[14px]"
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'Saving...' : 'Save Changes'}
                 </Button>
               </div>
             </form>
@@ -404,7 +410,6 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 <TableHead className="text-[14px]">Crop Type</TableHead>
                 <TableHead className="text-[14px]">Area</TableHead>
                 <TableHead className="text-[14px]">Planting Date</TableHead>
-                <TableHead className="text-[14px]">Growth Stage</TableHead>
                 <TableHead className="text-[14px]">Status</TableHead>
                 <TableHead className="text-[14px]">Progress</TableHead>
                 <TableHead className="text-right pr-8 text-[14px]">Actions</TableHead>
@@ -428,7 +433,6 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                       day: 'numeric'
                     })}
                   </TableCell>
-                  <TableCell className="text-[14px]">{plot.growth_stage}</TableCell>
                   <TableCell>
                     <StatusBadge status={plot.status} />
                   </TableCell>

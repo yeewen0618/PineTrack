@@ -45,6 +45,7 @@ export function SchedulePage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedTask, setSelectedTask] = useState<any>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const [plots, setPlots] = useState<Plot[]>([]);
   const [tasks, setTasks] = useState<ScheduleTaskVM[]>([]);
@@ -130,6 +131,11 @@ export function SchedulePage() {
 
     return tasksForDate;
   };
+
+  const selectedDateTasks = useMemo(() => {
+    if (!selectedDate) return [];
+    return getTasksForDate(selectedDate);
+  }, [selectedDate, tasks, filterPlot, filterStatus]);
 
   const getTasksForDay = (d: number) => {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -355,11 +361,21 @@ export function SchedulePage() {
                   return <div key={`empty-${index}`} className="h-[84px] border border-transparent" />;
                 }
 
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                 const dayTasks = getTasksForDay(d);
                 const maxVisible = 1;
 
                 return (
-                  <div key={d} className="h-[84px] border border-[#E5E7EB] rounded-xl bg-white p-2 relative">
+                  <div
+                    key={d}
+                    className="h-[84px] border border-[#E5E7EB] rounded-xl bg-white p-2 relative cursor-pointer"
+                    onClick={() => setSelectedDate(dateStr)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') setSelectedDate(dateStr);
+                    }}
+                  >
                     <div className="text-[14px] text-[#111827]">{d}</div>
 
                     <div className="mt-1 space-y-1">
@@ -368,7 +384,7 @@ export function SchedulePage() {
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <div
-                                className={`text-[12px] px-2 py-1 rounded-lg cursor-pointer truncate ${task.status === 'Proceed'
+                                className={`text-[12px] px-2 py-1 rounded-lg cursor-pointer ${task.status === 'Proceed'
                                   ? 'bg-[#DCFCE7] text-[#166534]'
                                   : task.status === 'Pending'
                                     ? 'bg-[#FEF3C7] text-[#92400E]'
@@ -379,12 +395,16 @@ export function SchedulePage() {
                                   setSelectedTask(task);
                                 }}
                               >
-                                {task.title}
+                                <p className="truncate">{task.title}</p>
+                                <p className="text-[10px] text-[#6B7280] truncate">
+                                  {task.assignedWorker ?? 'Unassigned'}
+                                </p>
                               </div>
                             </TooltipTrigger>
                             <TooltipContent className="max-w-[220px]">
                               <p className="font-medium">{task.title}</p>
                               <p className="text-xs text-[#6B7280]">{task.plotName} • {task.date}</p>
+                              <p className="text-xs text-[#6B7280]">Worker: {task.assignedWorker ?? 'Unassigned'}</p>
                             </TooltipContent>
                           </Tooltip>
                         </TooltipProvider>
@@ -437,7 +457,13 @@ export function SchedulePage() {
                   return (
                     <div
                       key={dayData.date}
-                      className="h-[84px] border border-[#E5E7EB] rounded-xl bg-white p-2 relative"
+                      className="h-[84px] border border-[#E5E7EB] rounded-xl bg-white p-2 relative cursor-pointer"
+                      onClick={() => setSelectedDate(dayData.date)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') setSelectedDate(dayData.date);
+                      }}
                     >
                       {/* Day number (same style as month view) */}
                       <div className="text-[14px] text-[#111827]">{dayData.dayNumber}</div>
@@ -448,7 +474,7 @@ export function SchedulePage() {
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <div
-                                  className={`text-[12px] px-2 py-1 rounded-lg cursor-pointer truncate ${task.status === 'Proceed'
+                                  className={`text-[12px] px-2 py-1 rounded-lg cursor-pointer ${task.status === 'Proceed'
                                     ? 'bg-[#DCFCE7] text-[#166534]'
                                     : task.status === 'Pending'
                                       ? 'bg-[#FEF3C7] text-[#92400E]'
@@ -459,7 +485,10 @@ export function SchedulePage() {
                                     setSelectedTask(task);
                                   }}
                                 >
-                                  {task.title}
+                                  <p className="truncate">{task.title}</p>
+                                  <p className="text-[10px] text-[#6B7280] truncate">
+                                    {task.assignedWorker ?? 'Unassigned'}
+                                  </p>
                                 </div>
                               </TooltipTrigger>
 
@@ -468,6 +497,7 @@ export function SchedulePage() {
                                 <p className="text-xs text-[#6B7280]">
                                   {task.plotName} • {task.date}
                                 </p>
+                                <p className="text-xs text-[#6B7280]">Worker: {task.assignedWorker ?? 'Unassigned'}</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
@@ -510,6 +540,9 @@ export function SchedulePage() {
                       </p>
                       <p className="text-[12px] text-[#6B7280] truncate">
                         {task.plotName} • {task.date}
+                      </p>
+                      <p className="text-[12px] text-[#6B7280] truncate">
+                        Worker: {task.assignedWorker ?? 'Unassigned'}
                       </p>
                     </div>
 
@@ -557,12 +590,10 @@ export function SchedulePage() {
               <StatusBadge status={selectedTask?.status} />
             </div>
 
-            {selectedTask?.assignedWorker && (
-              <div className="flex items-center justify-between">
-                <span className="text-[#6B7280]">Assigned</span>
-                <span>{selectedTask.assignedWorker}</span>
-              </div>
-            )}
+            <div className="flex items-center justify-between">
+              <span className="text-[#6B7280]">Assigned</span>
+              <span>{selectedTask?.assignedWorker ?? 'Unassigned'}</span>
+            </div>
 
             {selectedTask?.description && (
               <div>
@@ -576,6 +607,65 @@ export function SchedulePage() {
                 <p className="text-[#6B7280] mb-1">Reason</p>
                 <p className="text-[#111827]">{selectedTask.reason}</p>
               </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Date Details Dialog */}
+      <Dialog
+        key={selectedDate ?? 'date-dialog'}
+        open={!!selectedDate}
+        onOpenChange={(open) => {
+          if (!open) setSelectedDate(null);
+        }}
+      >
+        <DialogContent
+          className="rounded-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {selectedDate
+                ? new Date(selectedDate).toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                })
+                : 'Selected Date'}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedDateTasks.length} task{selectedDateTasks.length === 1 ? '' : 's'} matching current filters
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {selectedDateTasks.map((task) => (
+              <div
+                key={task.id}
+                className="p-3 rounded-xl border border-[#E5E7EB] bg-white"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[14px] text-[#111827] font-medium truncate">
+                      {task.title}
+                    </p>
+                    <p className="text-[12px] text-[#6B7280] truncate">
+                      {task.plotName} ({task.plotId})
+                    </p>
+                  </div>
+                  <StatusBadge status={task.status} />
+                </div>
+                <div className="mt-2 text-[12px] text-[#6B7280]">
+                  <p>Date: {task.date}</p>
+                  <p>Worker: {task.assignedWorker ?? 'Unassigned'}</p>
+                </div>
+              </div>
+            ))}
+
+            {selectedDateTasks.length === 0 && (
+              <p className="text-[12px] text-[#9CA3AF]">No tasks for this date under current filters.</p>
             )}
           </div>
         </DialogContent>

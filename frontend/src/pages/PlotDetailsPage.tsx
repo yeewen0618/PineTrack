@@ -174,8 +174,8 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
             <ArrowLeft size={20} />
           </Button>
           <div>
-            <h2 className="text-[20px] text-[#111827]">{plot.name}</h2>
-            <p className="text-[16px] text-[#374151]">{plot.crop_type}</p>
+            <h2 className="text-[24px] font-semibold leading-snug text-[#111827]">{plot.name}</h2>
+            <p className="text-[18px] text-[#374151]">{plot.crop_type}</p>
           </div>
         </div>
         <StatusBadge status={plot.status} />
@@ -183,25 +183,21 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
 
       {/* Plot Summary Card */}
       <Card className="p-6 rounded-2xl bg-white shadow-sm">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
           <div>
-            <p className="text-[14px] text-[#6B7280] mb-1">Area</p>
-            <p className="text-[18px] text-[#111827]">{plot.area_ha} hectares</p>
+            <p className="text-[15px] text-[#6B7280] mb-1">Area</p>
+            <p className="text-[20px] font-medium text-[#111827]">{plot.area_ha} hectares</p>
           </div>
           <div>
-            <p className="text-[14px] text-[#6B7280] mb-1">Planting Date</p>
-            <p className="text-[18px] text-[#111827]">
+            <p className="text-[15px] text-[#6B7280] mb-1">Planting Date</p>
+            <p className="text-[20px] font-medium text-[#111827]">
               {new Date(plot.planting_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
             </p>
           </div>
           <div>
-            <p className="text-[14px] text-[#6B7280] mb-1">Growth Stage</p>
-            <p className="text-[18px] text-[#111827]">{plot.growth_stage}</p>
-          </div>
-          <div>
-            <p className="text-[14px] text-[#6B7280] mb-1">Progress</p>
+            <p className="text-[15px] text-[#6B7280] mb-1">Progress</p>
             <div className="flex items-center gap-2">
-              <p className="text-[18px] text-[#111827]">{progress}%</p>
+              <p className="text-[20px] font-semibold text-[#111827]">{progress}%</p>
               <div className="flex-1 h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
                 <div
                   className={`h-full rounded-full ${progress >= 80 ? 'bg-[#2563eb]' : progress >= 60 ? 'bg-[#2563eb]' : 'bg-[#2563eb]'

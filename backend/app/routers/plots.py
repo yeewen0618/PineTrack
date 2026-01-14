@@ -1,13 +1,12 @@
 import re
 from fastapi import APIRouter, Depends, HTTPException
-from uuid import uuid4
-from datetime import timedelta
-from typing import Optional, Tuple
+from typing import Tuple
 from postgrest.exceptions import APIError
 
 from app.core.security import get_current_user
 from app.core.supabase_client import supabase
-from app.schemas.plots import CreatePlotWithPlanRequest
+from app.schemas.plots import CreatePlotWithPlanRequest, UpdatePlotRequest
+from app.routers.schedule import generate_schedule_for_plot
 
 router = APIRouter(prefix="/api/plots", tags=["Plots"])
 
@@ -88,43 +87,10 @@ def create_plot_with_plan(
     plot_id = f"P{max_num + 1:03d}"  # e.g., P007
 
     # 2️⃣ Determine grid position (location_x/location_y)
-    # Rule: they are GRID positions, not GPS.
-    loc_x = payload.location_x
-    loc_y = payload.location_y
-
-    if loc_x is None or loc_y is None:
-        # Auto-assign next available grid slot
-        # Get existing coords (ignore nulls)
-        coords_res = (
-            supabase.table("plots")
-            .select("location_x,location_y")
-            .execute()
-        )
-
-        used = set()
-        for r in (coords_res.data or []):
-            x = r.get("location_x")
-            y = r.get("location_y")
-            if x is not None and y is not None:
-                used.add((int(x), int(y)))
-
-        # Choose a simple grid policy (1..20 columns, 1..20 rows)
-        # Fill row-wise: (1,1), (2,1), ..., (20,1), (1,2), ...
-        found = None
-        for y in range(1, 21):
-            for x in range(1, 21):
-                if (x, y) not in used:
-                    found = (x, y)
-                    break
-            if found:
-                break
-
-        if not found:
-            raise HTTPException(status_code=400, detail="Farm map grid is full. Please expand grid size.")
-
-        loc_x, loc_y = found
-
-    # 3️⃣ Prepare plot row for insertion
+    # Rule: always use the default farm GPS coordinates for new plots.
+    loc_x = 102.284250
+    loc_y = 2.813306
+    # 3: Prepare plot row for insertion
     plot_row = {
         "id": plot_id,
         "name": payload.name,
@@ -134,11 +100,11 @@ def create_plot_with_plan(
         "growth_stage": payload.growth_stage,
         "status": "Proceed",
         "health_score": 0,
-        "location_x": int(loc_x),
-        "location_y": int(loc_y),
+        "location_x": loc_x,
+        "location_y": loc_y,
     }
 
-    # 2️⃣ Insert plot
+    # 4: Insert plot
     try:
         plot_res = supabase.table("plots").insert(plot_row).execute()
     except APIError as e:
@@ -147,78 +113,19 @@ def create_plot_with_plan(
     if not plot_res.data:
         raise HTTPException(status_code=400, detail="Failed to create plot")
 
-    # 3️⃣ Generate schedule (reuse logic)
-    templates_res = (
-        supabase.table("task_templates").select("*").eq("active", True).execute()
+    # 5: Generate schedule using shared logic (auto-assigns workers)
+    schedule_res = generate_schedule_for_plot(
+        start_date=payload.planting_date,
+        plot_id=plot_id,
+        mode="overwrite",
+        horizon_days=420,
+        allow_no_templates=True,
     )
-
-    templates = templates_res.data or []
-    if not templates:
-        return {
-            "plot_id": plot_id,
-            "message": "Plot created, but no templates found",
-            "tasks_created": 0,
-        }
-
-    tasks = []
-    start_date = payload.planting_date
-    horizon_days = 420  # ~14 months
-
-    for tpl in templates:
-        base_date = start_date + timedelta(days=tpl["start_offset_days"])
-
-        freq = tpl["frequency"]
-        interval = tpl["interval"]
-        end_offset = tpl.get("end_offset_days")
-
-        if end_offset:
-            end_date = start_date + timedelta(days=end_offset)
-        else:
-            end_date = start_date + timedelta(days=horizon_days)
-
-        dates = []
-
-        if freq in ["once", "event"]:
-            dates = [base_date]
-        else:
-            step = 1
-            if freq == "daily":
-                step = 1 * interval
-            elif freq == "weekly":
-                step = 7 * interval
-            elif freq == "monthly":
-                step = 30 * interval
-
-            d = base_date
-            while d <= end_date:
-                dates.append(d)
-                d += timedelta(days=step)
-
-        for d in dates:
-            tasks.append(
-                {
-                    "id": f"TASK_{uuid4().hex[:8].upper()}",
-                    "plot_id": plot_id,
-                    "title": tpl["title"],
-                    "type": tpl["type"],
-                    "task_date": d.isoformat(),
-                    "status": "Proceed",
-                    "description": tpl.get("description"),
-                    "original_date": d.isoformat(),
-                    "reason": "Auto-generated from task template",
-                }
-            )
-
-    # 4️⃣ Insert tasks
-    try:
-        task_res = supabase.table("tasks").insert(tasks).execute()
-    except APIError as e:
-        raise HTTPException(status_code=400, detail=e.args[0]["message"])
 
     return {
         "message": "Plot created and operation plan generated",
         "plot_id": plot_id,
-        "tasks_created": len(task_res.data or []),
+        "tasks_created": schedule_res.get("tasks_created", 0),
     }
 
 @router.delete("/{plot_id}")
@@ -233,3 +140,27 @@ def delete_plot(plot_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Plot not found")
 
     return {"ok": True, "deleted_plot_id": plot_id}
+
+
+@router.put("/{plot_id}")
+def update_plot(
+    plot_id: str,
+    payload: UpdatePlotRequest,
+    user=Depends(get_current_user),
+):
+    update_fields = payload.dict(exclude_unset=True)
+    if "planting_date" in update_fields and update_fields["planting_date"] is not None:
+        update_fields["planting_date"] = update_fields["planting_date"].isoformat()
+
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields provided to update")
+
+    try:
+        res = supabase.table("plots").update(update_fields).eq("id", plot_id).execute()
+    except APIError as e:
+        raise HTTPException(status_code=400, detail=e.args[0]["message"])
+
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Plot not found")
+
+    return {"ok": True, "data": res.data[0]}
