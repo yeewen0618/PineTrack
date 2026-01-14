@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import date, timedelta
 from uuid import uuid4
+import hashlib
+import logging
 
 from postgrest.exceptions import APIError
 
@@ -9,6 +11,7 @@ from app.core.supabase_client import supabase
 from app.schemas.schedule import GenerateScheduleRequest, EvaluateThresholdStatusRequest
 
 router = APIRouter(prefix="/api/schedule", tags=["Schedule"])
+logger = logging.getLogger(__name__)
 
 
 def _dates_for_template(start_date: date, tpl: dict, horizon_days: int = 120):
@@ -56,14 +59,34 @@ def _dates_for_template(start_date: date, tpl: dict, horizon_days: int = 120):
     return dates
 
 
-@router.post("/generate")
-def generate_schedule(payload: GenerateScheduleRequest, user=Depends(get_current_user)):
-    start_date = payload.start_date
-    plot_id = payload.plot_id
+def _fetch_active_workers():
+    res = (
+        supabase.table("workers")
+        .select("id, name")
+        # Only active field workers should receive auto-assigned tasks.
+        .eq("role", "Field Worker")
+        .eq("is_active", True)
+        .order("name")
+        .execute()
+    )
+    return res.data or []
 
-    # Optional: if you added these fields in schema (recommended)
-    mode = getattr(payload, "mode", "overwrite")          # overwrite | append
-    horizon_days = getattr(payload, "horizon_days", 120) # safety limit for recurrence
+
+def _stable_start_index(plot_id: str, worker_count: int) -> int:
+    if worker_count <= 0:
+        return 0
+    digest = hashlib.sha256(plot_id.encode("utf-8")).hexdigest()
+    return int(digest, 16) % worker_count
+
+
+def generate_schedule_for_plot(
+    start_date: date,
+    plot_id: str,
+    mode: str = "overwrite",
+    horizon_days: int = 120,
+    allow_no_templates: bool = False,
+):
+    logger.info("Generating schedule for plot_id=%s", plot_id)
 
     # 0) Validate plot exists (FK safety)
     plot_check = (
@@ -89,6 +112,15 @@ def generate_schedule(payload: GenerateScheduleRequest, user=Depends(get_current
 
     templates = templates_res.data or []
     if not templates:
+        if allow_no_templates:
+            return {
+                "message": "No active task templates found",
+                "plot_id": plot_id,
+                "start_date": start_date.isoformat(),
+                "tasks_created": 0,
+                "mode": mode,
+                "horizon_days": horizon_days,
+            }
         raise HTTPException(status_code=400, detail="No active task templates found")
 
     # 2) If overwrite, delete generated tasks in the horizon window to avoid duplicates
@@ -136,6 +168,36 @@ def generate_schedule(payload: GenerateScheduleRequest, user=Depends(get_current
             "tasks_created": 0
         }
 
+    # 3.5) Auto-assign workers (round-robin across all active field workers)
+    active_workers = _fetch_active_workers()
+    logger.info("Active workers fetched: %s", len(active_workers))
+    logger.info(
+        "Active workers list: %s",
+        [{"id": w.get("id"), "name": w.get("name")} for w in active_workers],
+    )
+
+    if not active_workers:
+        logger.info("DEBUG: No active workers found; tasks will be unassigned")
+    start_index = _stable_start_index(plot_id, len(active_workers))
+
+    for idx, task in enumerate(tasks_to_insert):
+        if not active_workers:
+            task["assigned_worker_id"] = None
+            task["assigned_worker_name"] = None
+            continue
+        selected = active_workers[(start_index + idx) % len(active_workers)]
+        task["assigned_worker_id"] = selected["id"]
+        task["assigned_worker_name"] = selected["name"]
+
+        logger.info(
+            "DEBUG: Assigned task %s (%s %s) -> %s (%s)",
+            task["id"],
+            task["title"],
+            task["task_date"],
+            selected["name"],
+            selected["id"],
+        )
+
     # 4) Insert
     try:
         insert_res = supabase.table("tasks").insert(tasks_to_insert).execute()
@@ -144,6 +206,7 @@ def generate_schedule(payload: GenerateScheduleRequest, user=Depends(get_current
         raise HTTPException(status_code=400, detail=e.args[0].get("message", str(e)))
 
     inserted_count = len(insert_res.data or [])
+    logger.info("Inserted tasks: %s", inserted_count)
 
     return {
         "message": "Schedule generated successfully",
@@ -155,13 +218,87 @@ def generate_schedule(payload: GenerateScheduleRequest, user=Depends(get_current
         "horizon_days": horizon_days
     }
 
+
+@router.post("/generate")
+def generate_schedule(payload: GenerateScheduleRequest, user=Depends(get_current_user)):
+    return generate_schedule_for_plot(
+        start_date=payload.start_date,
+        plot_id=payload.plot_id,
+        mode=getattr(payload, "mode", "overwrite"),
+        horizon_days=getattr(payload, "horizon_days", 120),
+    )
+
 @router.post("/evaluate-status-threshold")
 def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depends(get_current_user)):
     plot_id = payload.plot_id
     target_date = payload.date
-    readings = payload.readings
+    device_id = payload.device_id or 205
+    readings = payload.readings or {}
     thresholds = payload.thresholds
     reschedule_days = payload.reschedule_days
+
+    reading_meta = None
+
+    # Fetch latest cleaned_data for device_id (prefer data_added desc, fallback to processed_at desc)
+    cleaned_res = (
+        supabase.table("cleaned_data")
+        .select(
+            "device_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+            "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
+        )
+        .eq("device_id", device_id)
+        .order("data_added", desc=True)
+        .limit(1)
+        .execute()
+    )
+    cleaned_row = (cleaned_res.data or [None])[0]
+
+    if cleaned_row and cleaned_row.get("data_added") is None:
+        fallback_res = (
+            supabase.table("cleaned_data")
+            .select(
+                "device_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+                "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
+            )
+            .eq("device_id", device_id)
+            .order("processed_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        cleaned_row = (fallback_res.data or [None])[0] or cleaned_row
+
+    if cleaned_row:
+        logger.info("DEBUG: cleaned_data query device_id=%s", device_id)
+        logger.info("SUCCESS: Sensor data fetched: %s", cleaned_row)
+        readings = {
+            "temperature": cleaned_row.get("cleaned_temperature")
+            if cleaned_row.get("cleaned_temperature") is not None
+            else cleaned_row.get("temperature"),
+            "soil_moisture": cleaned_row.get("cleaned_soil_moisture")
+            if cleaned_row.get("cleaned_soil_moisture") is not None
+            else cleaned_row.get("soil_moisture"),
+            "nitrogen": cleaned_row.get("cleaned_nitrogen")
+            if cleaned_row.get("cleaned_nitrogen") is not None
+            else cleaned_row.get("nitrogen"),
+        }
+        reading_meta = {
+            "device_id": cleaned_row.get("device_id", device_id),
+            "timestamp": cleaned_row.get("data_added") or cleaned_row.get("processed_at"),
+        }
+    else:
+        logger.warning("WARNING: No sensor data found for device_id = %s", device_id)
+        logger.info("DEBUG: cleaned_data query device_id=%s", device_id)
+        logger.info("DEBUG: cleaned_data row fetched: %s", cleaned_row)
+        if payload.readings:
+            reading_meta = {
+                "device_id": device_id,
+                "timestamp": None,
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No cleaned_data found for device_id={device_id} and no readings provided",
+            )
 
     # 1) Load tasks for that plot + date
     tasks_res = (
@@ -219,5 +356,7 @@ def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depe
         "message": "Status evaluated using thresholds",
         "plot_id": plot_id,
         "date": target_date.isoformat(),
-        "updated": updated
+        "updated": updated,
+        "reading_device_id": reading_meta.get("device_id") if reading_meta else None,
+        "reading_timestamp": reading_meta.get("timestamp") if reading_meta else None,
     }

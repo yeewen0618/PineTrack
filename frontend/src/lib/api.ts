@@ -76,10 +76,22 @@ export type Task = {
   // ✅ frontend single-truth field (mapped from backend "status")
   decision: PlotStatus;
 
+  assigned_worker_id?: string | null;
+  assigned_worker_name?: string | null;
   description?: string | null;
   original_date?: string | null;
   proposed_date?: string | null;
   reason?: string | null;
+};
+export type Worker = {
+  id: string;
+  name: string;
+  role?: string | null;
+  tasks_completed?: number | null;
+  contact?: string | null;
+  avatar_url?: string | null;
+  is_active?: boolean | null;
+  created_at?: string | null;
 };
 
 // ---------- Plots ----------
@@ -114,6 +126,21 @@ export async function createPlotWithPlan(payload: {
   );
 }
 
+export async function updatePlot(
+  plotId: string,
+  payload: {
+    name?: string;
+    area_ha?: number;
+    crop_type?: string;
+    planting_date?: string; // YYYY-MM-DD
+  },
+) {
+  return apiFetch<{ ok: true; data: Plot }>(`/api/plots/${plotId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 /**
  * ✅ Helper: always get ONE plot by id using the same source
  * (later we can switch to a dedicated backend endpoint without changing pages)
@@ -144,6 +171,20 @@ export async function listTasks(params?: { plot_id?: string }) {
 export async function getTasksByPlotId(plotId: string): Promise<Task[]> {
   const res = await listTasks({ plot_id: plotId });
   return res.data;
+}
+
+// ---------- Workers ----------
+export async function listWorkers() {
+  const res = await apiFetch<{ ok: true; data: any[] }>("/api/workers");
+  const normalized = (res.data ?? []).map((worker) => {
+    const rawId = worker?.id ?? worker?.worker_id;
+    return {
+      ...worker,
+      id: rawId == null ? "" : String(rawId),
+    } as Worker;
+  });
+
+  return { ...res, data: normalized };
 }
 
 // ---------- Reschedule Center ----------

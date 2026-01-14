@@ -13,9 +13,9 @@ interface FarmMapPageProps {
 }
 
 type PlotVM = Plot & {
-  gridX: number | null;
-  gridY: number | null;
   progressPercent: number;
+  lng: number | null;
+  lat: number | null;
 };
 
 function toNumber(v: unknown): number | null {
@@ -53,55 +53,42 @@ export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
 
   const plotsVM: PlotVM[] = useMemo(() => {
     return (plots ?? []).map((p) => {
-      const x = toNumber(p.location_x);
-      const y = toNumber(p.location_y);
+      const lng = toNumber(p.location_x);
+      const lat = toNumber(p.location_y);
 
       return {
         ...p,
-        gridX: x === null ? null : Math.round(x),
-        gridY: y === null ? null : Math.round(y),
         progressPercent: clamp(calcHarvestProgressPercent(p.planting_date), 0, 100),
+        lng,
+        lat,
       };
     });
   }, [plots]);
 
   const plotMarkers = useMemo(() => {
-    return (plots ?? [])
+    return (plotsVM ?? [])
       .map((plot) => {
-        const lng = toNumber(plot.location_x);
-        const lat = toNumber(plot.location_y);
+        const { lng, lat } = plot;
         if (lng === null || lat === null) return null;
-        return { id: plot.id, name: plot.name, lng, lat };
+        return { id: plot.id, name: plot.name, lng, lat, status: plot.status };
       })
-      .filter((plot): plot is { id: string; name: string; lng: number; lat: number } => Boolean(plot));
-  }, [plots]);
+      .filter(
+        (plot): plot is { id: string; name: string; lng: number; lat: number; status: Plot["status"] } =>
+          Boolean(plot)
+      );
+  }, [plotsVM]);
 
   const mapCenter = useMemo(() => {
-    if (plotMarkers.length === 0) return undefined;
-    return { lng: plotMarkers[0].lng, lat: plotMarkers[0].lat };
+    if (plotMarkers.length > 0) {
+      return { lng: plotMarkers[0].lng, lat: plotMarkers[0].lat };
+    }
+    return { lng: 101.9758, lat: 4.2105 };
   }, [plotMarkers]);
 
-  // Only plots with usable grid coordinates
-  const mappable = useMemo(
-    () => plotsVM.filter((p) => p.gridX !== null && p.gridY !== null),
-    [plotsVM]
-  );
+  const mapZoom = useMemo(() => (plotMarkers.length > 0 ? 12 : 5), [plotMarkers.length]);
 
-  const maxX = useMemo(() => {
-    if (mappable.length === 0) return 1;
-    return Math.max(...mappable.map((p) => p.gridX as number));
-  }, [mappable]);
-
-  const maxY = useMemo(() => {
-    if (mappable.length === 0) return 1;
-    return Math.max(...mappable.map((p) => p.gridY as number));
-  }, [mappable]);
-
-  const useCompactLayout = useMemo(() => {
-    if (mappable.length === 0) return false;
-    const maxCells = maxX * maxY;
-    return mappable.length > 8 || maxCells > 20 || maxX > 6 || maxY > 6;
-  }, [mappable.length, maxX, maxY]);
+  // Only plots with usable coordinates
+  const mappable = useMemo(() => plotsVM.filter((p) => p.lng !== null && p.lat !== null), [plotsVM]);
 
   const getStatusColor = (status: Plot["status"]) => {
     switch (status) {
@@ -151,6 +138,7 @@ export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
       <Card className="p-4 rounded-2xl bg-white">
         <FarmSatelliteMap
           center={mapCenter}
+          zoom={mapZoom}
           plots={plotMarkers}
           onPlotClick={(plotId) => navigate(`/plots/${plotId}`)}
         />
@@ -171,28 +159,14 @@ export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
 
         {!loading && mappable.length > 0 && (
           <div
-            className="grid gap-4"
-            style={{
-              ...(useCompactLayout
-                ? { gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }
-                : {
-                    gridTemplateColumns: `repeat(${maxX}, minmax(200px, 1fr))`,
-                    gridTemplateRows: `repeat(${maxY}, minmax(200px, 1fr))`,
-                  }),
-            }}
+            className={`grid gap-6 ${
+              plots.length > 8 ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-3" : "grid-cols-1 md:grid-cols-2"
+            }`}
           >
             {mappable.map((plot) => (
               <div
                 key={plot.id}
                 className={`${getStatusColor(plot.status)} rounded-2xl p-6 text-white cursor-pointer transition-all transform hover:scale-105 shadow-lg`}
-                style={
-                  useCompactLayout
-                    ? undefined
-                    : {
-                        gridColumn: plot.gridX as number,
-                        gridRow: plot.gridY as number,
-                      }
-                }
                 onClick={() => onNavigate("plot-details", plot.id)}
                 role="button"
                 tabIndex={0}
@@ -203,22 +177,21 @@ export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
               >
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <h3 className="text-xl mb-1">{plot.name}</h3>
-                    <p className="text-sm opacity-90">{plot.crop_type}</p>
+                    <h3 className="text-[22px] font-semibold leading-snug mb-1">{plot.name}</h3>
+                    <p className="text-base opacity-90">{plot.crop_type}</p>
                   </div>
                   <MapPin size={24} />
                 </div>
 
-                <div className="space-y-2 text-sm opacity-90">
+                <div className="space-y-2 text-base opacity-90">
                   <p>{plot.area_ha} hectares</p>
-                  <p>{plot.growth_stage}</p>
                 </div>
 
                 {/* Progress (same idea as Plot Management) */}
                 <div className="mt-4 pt-4 border-t border-white/20">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm opacity-80">Progress</span>
-                    <span className="font-semibold">{plot.progressPercent}%</span>
+                    <span className="text-base opacity-80">Progress</span>
+                    <span className="text-lg font-semibold">{plot.progressPercent}%</span>
                   </div>
                   <div className="w-full h-2 bg-white/20 rounded-full mt-2 overflow-hidden">
                     <div
