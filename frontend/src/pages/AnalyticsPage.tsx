@@ -9,10 +9,8 @@ import {
   SelectValue
 } from '../components/ui/select';
 // Remove mockPlots import
-import { getAnalyticsHistory, getAnalyticsForecast, getRecommendations } from '../lib/api';
+import { getAnalyticsHistory, getAnalyticsForecast, getWeatherAnalytics, listTasks, getWeatherRescheduleSuggestions } from '../lib/api';
 import {
-  LineChart,
-  Line,
   AreaChart,
   Area,
   BarChart,
@@ -27,22 +25,71 @@ import {
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { ForecastFilter } from '../components/ForecastFilter';
 
+interface AnalyticsData {
+  date: string;
+  temperature_raw: number;
+  temperature_clean: number;
+  moisture_raw: number;
+  moisture_clean: number;
+  nitrogen_raw: number;
+  nitrogen_clean: number;
+  // allow other props for flexibility
+  [key: string]: unknown;
+}
+
+interface WeatherAnalyticsItem {
+   date: string;
+   time?: string;
+   type?: string;
+   rain?: number;
+   [key: string]: unknown;
+}
+
+interface Suggestion {
+  type: string;
+  task_name: string;
+  task_id?: string;
+  original_date: string;
+  suggested_date: string;
+  reason: string;
+}
+
 export function AnalyticsPage() {
   const [selectedPlot, setSelectedPlot] = useState<string>('all');
   const [forecastRange, setForecastRange] = useState<'1W'>('1W');
-  const [historicalData, setHistoricalData] = useState<any[]>([]);
-  const [forecastData, setForecastData] = useState<any[]>([]);
-  const [recommendations, setRecommendations] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [historicalData, setHistoricalData] = useState<AnalyticsData[]>([]);
+  const [forecastData, setForecastData] = useState<unknown[]>([]); // Forecast structure might vary
+  const [weatherData, setWeatherData] = useState<WeatherAnalyticsItem[]>([]);
+  const [weatherSuggestions, setWeatherSuggestions] = useState<Suggestion[]>([]);
+  // const [loading, setLoading] = useState(true);
 
   // Fetch real data on mount and when forecast range changes
   useEffect(() => {
     async function fetchData() {
+      // setLoading(true);
+      const safeFetch = async <T,>(promise: Promise<T>, fallback: T): Promise<T> => {
+        try {
+          return await promise;
+        } catch (e) {
+          console.error("Partial fetch error:", e);
+          return fallback;
+        }
+      };
       try {
-        setLoading(true);
-        // 1. Fetch History (Fixed window for now)
-        const history = await getAnalyticsHistory(30);
-        const processedHistory = history.map((item: any) => ({
+        // 1. Fetch History
+        interface RawBackendHistory {
+          data_added: string;
+          temperature: number;
+          cleaned_temperature: number;
+          soil_moisture: number;
+          cleaned_soil_moisture: number;
+          nitrogen: number;
+          cleaned_nitrogen: number;
+          [key: string]: unknown;
+        }
+
+        const history = await safeFetch<RawBackendHistory[]>(getAnalyticsHistory(30) as unknown as Promise<RawBackendHistory[]>, []);
+        const processedHistory: AnalyticsData[] = history.map((item) => ({
           ...item,
           date: item.data_added,
           temperature_raw: item.temperature,
@@ -56,21 +103,62 @@ export function AnalyticsPage() {
 
         // 2. Fetch Forecast
         const days = 7;
-        // if (forecastRange === '3M') days = 90;
-        // if (forecastRange === '1Y') days = 90;
-
-        const forecast = await getAnalyticsForecast(days);
-        // Process forecast if needed (dates are already ISO)
+        const forecast = await safeFetch<unknown[]>(getAnalyticsForecast(days), []);
         setForecastData(forecast);
 
-        // 3. Fetch Recommendations
-        const recs = await getRecommendations(205);
-        setRecommendations(recs);
+        // 3. Fetch Recommendations - Removed
+
+        // 4. Fetch Weather Data
+        const weather = await safeFetch<WeatherAnalyticsItem[]>(getWeatherAnalytics(), []);
+        setWeatherData(weather);
+
+        // 5. Fetch Tasks for Tomorrow (simulate for demo: all tasks with due_date = tomorrow)
+        const allTasksRes = await safeFetch(listTasks(), { ok: true, data: [] });
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+        // t is typed as any in original, but now listTasks is typed. use 'as any' if strictly needed or let TS infer
+        // listTasks returns { data: Task[] }
+        const tasksForTomorrow = allTasksRes.data.filter((t) => t.task_date === tomorrowStr);
+
+        // 6. Prepare weather forecast for tomorrow (simulate: filter weatherData for tomorrow)
+        const weatherForecastForTomorrow = weather.filter((w: WeatherAnalyticsItem) => {
+          // Assume weatherData has 'date' or 'time' field
+          const dateStr = w.date || w.time;
+          return dateStr && dateStr.slice(0, 10) === tomorrowStr;
+        });
+
+        // 7. Calculate Sensor Summary (Last available data)
+        let sensorSummary = null;
+        if (processedHistory.length > 0) {
+           const latest = processedHistory[processedHistory.length - 1];
+           sensorSummary = {
+             avg_n: latest.nitrogen_clean,
+             avg_moisture: latest.moisture_clean,
+             avg_temp: latest.temperature_clean
+           };
+        }
+
+        // 8. Fetch Insight Recommendations (Weather + Sensors)
+        let suggestions = [];
+        // We always try to fetch, even if no tasks, because we might have system triggers (drainage/sunburn)
+        try {
+            // Note: In real app, pass all tasks or filtered by range. 
+            // For now passing tasksForTomorrow plus maybe today if needed, or just let backend decide.
+            // But previous logic was specific to "tomorrow tasks", let's keep tasksForTomorrow 
+            // but the new backend logic can handle generally.
+            // Ideally we pass a broader range of tasks. 
+            const result = await getWeatherRescheduleSuggestions(tasksForTomorrow, weatherForecastForTomorrow, sensorSummary);
+            suggestions = result.suggestions ?? [];
+        } catch (e) {
+            console.error("Insight suggestion error:", e);
+        }
+        setWeatherSuggestions(suggestions);
 
       } catch (err) {
-        console.error("Failed to fetch analytics:", err);
+        console.error("Critical error in analytics:", err);
       } finally {
-        setLoading(false);
+        // setLoading(false);
       }
     }
     fetchData();
@@ -80,19 +168,67 @@ export function AnalyticsPage() {
   // Calculate trends safely
   const calculateTrend = (key: string) => {
     if (historicalData.length < 2) return 0;
-    const last = historicalData[historicalData.length - 1][key] || 0;
-    const first = historicalData[0][key] || 0;
+    const lastItem = historicalData[historicalData.length - 1];
+    const firstItem = historicalData[0];
+    
+    // Explicitly cast to number to avoid TS arithmetic error on 'unknown'
+    const last = Number(lastItem[key]) || 0;
+    const first = Number(firstItem[key]) || 0;
+    
     return last - first;
   };
 
   const moistureTrend = calculateTrend('moisture_clean');
   const nitrogenTrend = calculateTrend('nitrogen_clean');
 
+  // Split and aggregate weather data for Historical (Daily Sum)
+  const weatherHistorical = useMemo(() => {
+    const rawData = weatherData.filter(d => d.type === 'Historical');
+    
+    // Aggregate by day
+    const dailyMap = new Map<string, number>();
+    
+    rawData.forEach(item => {
+      // Assuming item.time is ISO string like "2025-01-17T00:00"
+      // Take first 10 chars (YYYY-MM-DD)
+      const dateStr = String(item.time).substring(0, 10); 
+      const rain = item.rain || 0;
+      
+      if (dailyMap.has(dateStr)) {
+        dailyMap.set(dateStr, dailyMap.get(dateStr)! + rain);
+      } else {
+        dailyMap.set(dateStr, rain);
+      }
+    });
+
+    // Convert back to array
+    const aggregated = Array.from(dailyMap.entries()).map(([date, rain]) => ({
+      time: date,
+      rain: rain
+    })).sort((a, b) => a.time.localeCompare(b.time));
+
+    console.log("Historical Weather (Daily):", aggregated); 
+    return aggregated;
+  }, [weatherData]);
+  
+  const weatherForecast = useMemo(() => {
+    const data = weatherData.filter(d => d.type === 'Forecast');
+    console.log("Forecast Weather:", data); // DEBUGGING
+    return data;
+  }, [weatherData]);
+
   // Format date for x-axis
   const formatXAxis = (dateStr: string) => {
     if (!dateStr) return "";
     const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit' });
+    // Jan 12 (5PM)
+    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric' }).replace(',', ' (').replace(/ AM| PM/, '') + (date.getHours() >= 12 ? 'PM)' : 'AM)');
+  };
+
+  const formatDailyAxis = (dateStr: string) => {
+    if (!dateStr) return "";
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   };
 
   return (
@@ -161,7 +297,7 @@ export function AnalyticsPage() {
         <Tabs defaultValue="moisture" className="w-full">
           <TabsList
             className="
-    grid w-full grid-cols-3 gap-2
+    grid w-full grid-cols-4 gap-2
     bg-transparent rounded-2xl mb-6
   "
           >
@@ -209,6 +345,21 @@ export function AnalyticsPage() {
             >
               Temperature
             </TabsTrigger>
+
+            <TabsTrigger
+              value="weather"
+              className="
+      rounded-xl px-3 py-2 text-sm
+      text-[#6B7280]
+      hover:bg-[#F3FFF7]
+      data-[state=active]:bg-[#DCFCE7]
+      data-[state=active]:text-[#15803D]
+      data-[state=active]:shadow-sm
+      transition-colors
+    "
+            >
+              Weather
+            </TabsTrigger>
           </TabsList>
 
 
@@ -244,6 +395,7 @@ export function AnalyticsPage() {
                     <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
+                      labelFormatter={formatXAxis}
                     />
                     <Legend verticalAlign="top" height={36}/>
                     {/* Render Cleaned Data FIRST (Background Area) */}
@@ -299,6 +451,7 @@ export function AnalyticsPage() {
                     <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
+                      labelFormatter={formatXAxis}
                     />
                     <Area
                       type="monotone"
@@ -352,6 +505,7 @@ export function AnalyticsPage() {
                     />
                     <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
+                      labelFormatter={formatXAxis}
                       labelStyle={{ color: '#111827' }}
                     />
                     <Legend verticalAlign="top" height={36}/>
@@ -401,6 +555,7 @@ export function AnalyticsPage() {
                     />
                     <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
+                      labelFormatter={formatXAxis}
                       labelStyle={{ color: '#111827' }}
                     />
                     <Bar
@@ -450,6 +605,7 @@ export function AnalyticsPage() {
                     />
                     <Tooltip
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
+                      labelFormatter={formatXAxis}
                       labelStyle={{ color: '#111827' }}
                     />
                     <Legend verticalAlign="top" height={36}/>
@@ -504,6 +660,7 @@ export function AnalyticsPage() {
                       label={{ value: '°C', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
                     />
                     <Tooltip
+                      labelFormatter={formatXAxis}
                       contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
                       labelStyle={{ color: '#111827' }}
                     />
@@ -526,42 +683,133 @@ export function AnalyticsPage() {
             </div>
           </TabsContent>
 
+          <TabsContent value="weather" className="mt-0">
+            <h3 className="text-[20px] text-[#111827] mb-6">Local Weather Conditions (Open-Meteo)</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* Historical Weather Chart */}
+              <div className="bg-[#F9FAFB] rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.08)] flex flex-col">
+                <div className="h-[60px] flex items-start mb-4">
+                  <h4 className="text-[18px] text-[#111827]">Historical Rainfall (Daily Sum - Last 20 Days)</h4>
+                </div>
+                <ResponsiveContainer width="100%" height={320}>
+                  <BarChart data={weatherHistorical}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                    <XAxis
+                      dataKey="time"
+                      stroke="#6B7280"
+                      fontSize={12}
+                      tickFormatter={formatDailyAxis}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
+                      label={{ value: 'mm', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
+                    />
+                    <Tooltip
+                      contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
+                      labelStyle={{ color: '#111827' }}
+                      formatter={(value: unknown) => [`${Number(value).toFixed(1)} mm`, 'Rain']}
+                      labelFormatter={formatDailyAxis}
+                    />
+                    <Legend verticalAlign="top" height={36}/>
+                     <Bar
+                      dataKey="rain"
+                      fill="#3B82F6"
+                      radius={[4, 4, 0, 0]}
+                      name="Rain (mm)"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+             </div>
+
+              {/* Forecast Weather Chart */}
+              <div className="bg-[#F9FAFB] rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.08)] flex flex-col">
+                <div className="h-[60px] flex flex-col mb-4">
+                  <h4 className="text-[18px] text-[#111827] mb-2">Rainfall Forecast (Next 7 Days)</h4>
+                </div>
+                <ResponsiveContainer width="100%" height={320}>
+                  <BarChart data={weatherForecast}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                    <XAxis
+                      dataKey="time"
+                      stroke="#6B7280"
+                      fontSize={12}
+                      tickFormatter={formatXAxis}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      stroke="#6B7280"
+                      fontSize={12}
+                      domain={[0, 16]}
+                      label={{ value: 'mm', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
+                    />
+                    <Tooltip
+                      labelFormatter={formatXAxis}
+                      contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
+                      labelStyle={{ color: '#111827' }}
+                    />
+                    <Legend verticalAlign="top" height={36}/>
+                     <Bar
+                      dataKey="rain"
+                      fill="#93C5FD" 
+                      radius={[4, 4, 0, 0]}
+                      name="Rain (mm)"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="flex items-center gap-2 mt-3 text-[14px] text-[#6B7280]">
+                   {/* Legend description if needed, logic for 'Forecast (dashed)' removed as bar chart doesn't use dashes */}
+                   <div className="w-4 h-4 bg-[#93C5FD] rounded-sm"></div>
+                  <span>Forecast</span>
+                </div>
+             </div>
+
+            </div>
+          </TabsContent>
+
 
         </Tabs>
       </Card>
 
-      {/* AI Recommendations */}
+      {/* Insight Recommendation (Weather-based) */}
       <Card className="p-6 rounded-2xl bg-gradient-to-br from-[#10B981] to-[#059669] text-white shadow-sm">
         <div className="flex items-center justify-between mb-4">
-           <h3 className="text-[18px] font-semibold">AI Recommendations (Rule Based)</h3>
-           <span className="text-xs bg-white/20 px-2 py-1 rounded-lg">Updated Today</span>
+           <h3 className="text-[18px] font-semibold">Insight Recommendation</h3>
         </div>
-        
         <div className="space-y-3">
-          {recommendations.length > 0 ? (
-            recommendations.map((rec, idx) => (
+          {weatherSuggestions.length > 0 ? (
+            weatherSuggestions.map((sugg, idx) => {
+              let icon = '🌧️';
+              if (sugg.type === 'DELAY') icon = '⏳';
+              else if (sugg.type === 'TIME_SHIFT') icon = '🕘';
+              else if (sugg.type === 'TRIGGER') icon = '🚨';
+              else if (sugg.type === 'PRIORITY') icon = '🔥';
+
+              return (
               <div key={idx} className="bg-white/10 rounded-xl p-4 shadow-sm border border-white/10 backdrop-blur-sm">
                 <div className="flex items-center gap-2 mb-1">
                   <p className="text-[16px] font-medium opacity-95">
-                    {rec.category === 'Critical' && '🚨 '}
-                    {rec.category === 'Warning' && '⚠️ '}
-                    {rec.category === 'Action' && '⚡ '}
-                    {rec.category === 'Info' && 'ℹ️ '}
-                    {rec.parameter} Alert
+                    {icon} {sugg.task_name} {sugg.task_id && !String(sugg.task_id).includes('trigger') && `(ID: ${sugg.task_id})`}
                   </p>
-                  {rec.priority <= 2 && (
-                    <span className="text-[10px] bg-red-500/80 px-2 py-0.5 rounded text-white font-bold">HIGH PRIORITY</span>
-                  )}
                 </div>
                 <p className="text-[14px] opacity-90 leading-relaxed font-light">
-                  {rec.message}
+                   {(sugg.type === 'TRIGGER' || sugg.type === 'PRIORITY') ? (
+                     <span>Action Required: <b>{sugg.task_name}</b></span>
+                   ) : (
+                     <span>Suggest reschedule from <b>{sugg.original_date}</b> to <b>{sugg.suggested_date}</b>.</span>
+                   )}
+                  <br/>
+                  Reason: {sugg.reason}
                 </p>
               </div>
-            ))
+              );
+            })
           ) : (
             <div className="bg-white/10 rounded-xl p-4 text-center">
-              <p className="opacity-90">✅ No critical actions required today.</p>
-              <p className="text-sm opacity-70 mt-1">System monitoring active.</p>
+              <p className="opacity-90">No Actionable Insight Required</p>
+              <p className="text-sm opacity-70 mt-1">All tasks are safe to proceed.</p>
             </div>
           )}
         </div>

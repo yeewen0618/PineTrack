@@ -49,7 +49,9 @@ def generate_forecasts(days: int = 7):
         X_train = train_df[['hour', 'dayofweek', 'lag_1', 'lag_24']]
         y_train = train_df[target_col]
 
-        model = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=-1)
+        # OPTIMIZATION: Reduced n_estimators from 50 to 15 for faster response time
+        # This reduces training time significantly while keeping acceptable accuracy for demo
+        model = RandomForestRegressor(n_estimators=15, max_depth=10, random_state=42, n_jobs=-1)
         model.fit(X_train, y_train)
 
         # Iterative Forecasting
