@@ -260,8 +260,9 @@ export async function rejectReschedule(taskId: string) {
   } as { ok: true; data: Task };
 }
 
-export async function getAnalyticsHistory(days: number = 30) {
-  const res = await fetch(`${API_BASE}/analytics/history?days=${days}`, {
+export async function getAnalyticsHistory(days: number = 30, plotId?: string) {
+  const plotQuery = plotId ? `&plot_id=${encodeURIComponent(plotId)}` : "";
+  const res = await fetch(`${API_BASE}/analytics/history?days=${days}${plotQuery}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
@@ -277,10 +278,11 @@ export async function getAnalyticsHistory(days: number = 30) {
   return res.json();
 }
 
-export async function getAnalyticsForecast(days: number = 7) {
+export async function getAnalyticsForecast(days: number = 7, plotId?: string) {
   // Map friendly strings to integers if passed (e.g. '1W' -> 7 handled in component, or here)
   // For now expecting integer
-  const res = await fetch(`${API_BASE}/analytics/forecast?days=${days}`, {
+  const plotQuery = plotId ? `&plot_id=${encodeURIComponent(plotId)}` : "";
+  const res = await fetch(`${API_BASE}/analytics/forecast?days=${days}${plotQuery}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
@@ -294,8 +296,9 @@ export async function getAnalyticsForecast(days: number = 7) {
   return res.json();
 }
 
-export async function getWeatherAnalytics() {
-  const res = await fetch(`${API_BASE}/analytics/weather`, {
+export async function getWeatherAnalytics(plotId?: string) {
+  const plotQuery = plotId ? `?plot_id=${encodeURIComponent(plotId)}` : "";
+  const res = await fetch(`${API_BASE}/analytics/weather${plotQuery}`, {
       method: "GET",
       headers: { "Content-Type": "application/json" }
   });
