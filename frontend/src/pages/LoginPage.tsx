@@ -167,7 +167,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
         {/* Footer */}
         <div className="mt-8 text-center text-sm text-[#6B7280]">
-          <p>© 2025 PineTrack. All rights reserved.</p>
+          <p>© 2026 PineTrack. All rights reserved.</p>
         </div>
       </div>
     </div>
