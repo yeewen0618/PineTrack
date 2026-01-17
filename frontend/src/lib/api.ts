@@ -1,6 +1,24 @@
+// ---------- Suggestions ----------
+export async function getWeatherRescheduleSuggestions(
+  tasks: Task[], 
+  weatherForecast: Record<string, unknown>[], 
+  sensorSummary?: { avg_n: number; avg_moisture: number; avg_temp: number }
+) {
+  const res = await fetch(`${API_BASE}/suggestions/weather-reschedule`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ 
+      tasks, 
+      weather_forecast: weatherForecast,
+      sensor_summary: sensorSummary 
+    })
+  });
+  if (!res.ok) throw new Error("Failed to fetch insight suggestions");
+  return res.json();
+}
 // src/lib/api.ts
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:5001";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
 
 export async function apiFetch<T>(
   path: string,
@@ -51,6 +69,16 @@ export async function deletePlot(plotId: string) {
 // ---------- Types ----------
 export type PlotStatus = "Proceed" | "Pending" | "Stop";
 
+// Helper interfaces for raw backend responses to avoid 'any'
+interface RawBackendPlot extends Partial<Plot> {
+    plot_id?: string | number;
+}
+
+interface RawBackendTask extends Partial<Omit<Task, 'decision'>> {
+    status?: string | PlotStatus;
+}
+
+
 export type Plot = {
   id: string;
   name: string;
@@ -96,7 +124,7 @@ export type Worker = {
 
 // ---------- Plots ----------
 export async function listPlots() {
-  const res = await apiFetch<{ ok: true; data: any[] }>("/api/plots");
+  const res = await apiFetch<{ ok: true; data: RawBackendPlot[] }>("/api/plots");
   const normalized = (res.data ?? []).map((plot) => {
     const rawId = plot?.id ?? plot?.plot_id;
     return {
@@ -156,7 +184,7 @@ export async function getPlotById(plotId: string): Promise<Plot> {
 // ---------- Tasks ----------
 export async function listTasks(params?: { plot_id?: string }) {
   const query = params?.plot_id ? `?plot_id=${encodeURIComponent(params.plot_id)}` : "";
-  const res = await apiFetch<{ ok: true; data: any[] }>(`/api/tasks${query}`);
+  const res = await apiFetch<{ ok: true; data: RawBackendTask[] }>(`/api/tasks${query}`);
 
   return {
     ...res,
@@ -193,7 +221,7 @@ export async function listWorkers() {
  * If backend later supports filtering by plot_id, we can add params safely.
  */
 export async function listRescheduleProposals() {
-  const res = await apiFetch<{ ok: true; data: any[] }>("/api/tasks/reschedule-proposals");
+  const res = await apiFetch<{ ok: true; data: RawBackendTask[] }>("/api/tasks/reschedule-proposals");
 
   return {
     ...res,
@@ -205,7 +233,7 @@ export async function listRescheduleProposals() {
 }
 
 export async function approveReschedule(taskId: string) {
-  const res = await apiFetch<{ ok: true; data: any }>(`/api/tasks/${taskId}/approve-reschedule`, {
+  const res = await apiFetch<{ ok: true; data: RawBackendTask }>(`/api/tasks/${taskId}/approve-reschedule`, {
     method: "POST",
   });
 
@@ -219,7 +247,7 @@ export async function approveReschedule(taskId: string) {
 }
 
 export async function rejectReschedule(taskId: string) {
-  const res = await apiFetch<{ ok: true; data: any }>(`/api/tasks/${taskId}/reject-reschedule`, {
+  const res = await apiFetch<{ ok: true; data: RawBackendTask }>(`/api/tasks/${taskId}/reject-reschedule`, {
     method: "POST",
   });
 
@@ -230,4 +258,58 @@ export async function rejectReschedule(taskId: string) {
       decision: res.data.status as PlotStatus,
     } as Task,
   } as { ok: true; data: Task };
+}
+
+export async function getAnalyticsHistory(days: number = 30) {
+  const res = await fetch(`${API_BASE}/analytics/history?days=${days}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      // Add Authorization header if needed later
+      // "Authorization": `Bearer ${token}` 
+    }
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to fetch historical data");
+  }
+
+  return res.json();
+}
+
+export async function getAnalyticsForecast(days: number = 7) {
+  // Map friendly strings to integers if passed (e.g. '1W' -> 7 handled in component, or here)
+  // For now expecting integer
+  const res = await fetch(`${API_BASE}/analytics/forecast?days=${days}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    }
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to fetch forecast data");
+  }
+
+  return res.json();
+}
+
+export async function getWeatherAnalytics() {
+  const res = await fetch(`${API_BASE}/analytics/weather`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" }
+  });
+
+  if (!res.ok) throw new Error("Failed to fetch weather data");
+  return res.json();
+}
+
+export async function getDashboardWeather() {
+  const res = await fetch(`${API_BASE}/analytics/weather/dashboard`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" }
+  });
+
+  if (!res.ok) throw new Error("Failed to fetch dashboard weather");
+  return res.json();
 }

@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { WeatherCard } from '../components/WeatherCard';
 import { PlotCard } from '../components/PlotCard';
-import { StatusBadge } from '../components/StatusBadge';
 import { Sun, CloudSun, CloudRain, Cloud, AlertTriangle, Calendar, Users } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
@@ -10,14 +9,34 @@ import { toast } from 'sonner';
 import { calcHarvestProgressPercent } from '../lib/progress';
 
 // ✅ Use real API
-import { listPlots, listTasks } from '../lib/api';
-import type { Plot, Task } from '../lib/api';
+import { listPlots, listTasks, getDashboardWeather, getAnalyticsHistory, getWeatherAnalytics, getWeatherRescheduleSuggestions } from '../lib/api';
+import type { Plot } from '../lib/api';
 
-// ✅ Keep weather as mock for now (no weather DB yet)
-import { currentWeather, weatherForecast } from '../lib/mockData';
+// Weather types (aligned with backend response)
+interface CurrentWeather {
+  temperature: number;
+  condition: string;
+  icon: string;
+}
+
+interface ForecastDay {
+  day: string;
+  temp: number;
+  icon: string;
+  condition: string;
+}
 
 interface DashboardPageProps {
   onNavigate: (page: string, plotId?: string) => void;
+}
+
+interface Suggestion {
+  type: string;
+  task_name: string;
+  task_id?: string;
+  original_date: string;
+  suggested_date: string;
+  reason: string;
 }
 
 type TaskVM = {
@@ -28,7 +47,7 @@ type TaskVM = {
   plotName: string;
   decision: "Proceed" | "Pending" | "Stop";
 
-  // ✅ add these because Dashboard UI uses them
+  // add these because Dashboard UI uses them
   reason?: string | null;
   original_date?: string | null;
   proposed_date?: string | null;
@@ -38,6 +57,9 @@ type TaskVM = {
 export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const [plots, setPlots] = useState<Plot[]>([]);
   const [tasks, setTasks] = useState<TaskVM[]>([]);
+  const [weather, setWeather] = useState<CurrentWeather | null>(null);
+  const [forecast, setForecast] = useState<ForecastDay[]>([]);
+  const [weatherSuggestions, setWeatherSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
 
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -65,13 +87,13 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
         plotsData.map((p) => [p.id, p.name]),
       );
 
-      const enriched: TaskVM[] = tasksData.map((t: any) => ({
+      const enriched: TaskVM[] = tasksData.map((t) => ({
         id: t.id,
         title: t.title,
         date: t.task_date,
         plotId: t.plot_id,
         plotName: plotNameById.get(t.plot_id) ?? t.plot_id,
-        decision: t.decision ?? t.status,
+        decision: t.decision ?? "Proceed", // Fallback if undefined
 
         reason: t.reason ?? null,
         original_date: t.original_date ?? null,
@@ -80,8 +102,63 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
 
 
       setTasks(enriched);
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Failed to load dashboard data');
+
+      // 4) Fetch Weather
+      try {
+        const weatherData = await getDashboardWeather();
+        setWeather(weatherData.current);
+        setForecast(weatherData.forecast);
+      } catch (wErr) {
+        console.error("Weather fetch failed", wErr);
+        // Don't block whole dashboard if weather fails, just leave it null/empty
+      }
+
+      // 5) Fetch Insight Recommendations
+      try {
+         // Need history for sensors
+         const history = await getAnalyticsHistory(30).catch(() => []);
+         const processedHistory = history.map((item: { cleaned_temperature: number; cleaned_soil_moisture: number; cleaned_nitrogen: number }) => ({
+           ...item,
+           temperature_clean: item.cleaned_temperature,
+           moisture_clean: item.cleaned_soil_moisture,
+           nitrogen_clean: item.cleaned_nitrogen,
+         }));
+         
+         let sensorSummary = null;
+         if (processedHistory.length > 0) {
+            const latest = processedHistory[processedHistory.length - 1];
+            sensorSummary = {
+              avg_n: latest.nitrogen_clean,
+              avg_moisture: latest.moisture_clean,
+              avg_temp: latest.temperature_clean
+            };
+         }
+
+         // Need weather forecast for tomorrow
+         const fullWeather = await getWeatherAnalytics().catch(() => []);
+         const tomorrow = new Date();
+         tomorrow.setDate(tomorrow.getDate() + 1);
+         const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+
+         // Helper logic to find tomorrow's forecast from analytics data
+         const weatherForecastForTomorrow = fullWeather.filter((w: { date?: string; time?: string }) => {
+             const dateStr = w.date || w.time;
+             return dateStr && dateStr.slice(0, 10) === tomorrowStr;
+         });
+
+         // Tasks for tomorrow
+         const tasksForTomorrow = tasksData.filter((t) => t.task_date === tomorrowStr);
+         
+         const result = await getWeatherRescheduleSuggestions(tasksForTomorrow, weatherForecastForTomorrow, sensorSummary);
+         setWeatherSuggestions(result.suggestions ?? []);
+
+      } catch (err) {
+         console.error("Insight fetch failed", err);
+      }
+
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to load dashboard data';
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -89,7 +166,6 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
 
   useEffect(() => {
     loadDashboard();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ✅ Option A: progress is computed at frontend (not stored)
@@ -197,32 +273,40 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
         ))}
       </div>
 
-      {/* Weather Section (still mock) */}
+      {/* Weather Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Current Weather */}
         <div>
-          <WeatherCard
-            temperature={currentWeather.temperature}
-            condition={currentWeather.condition}
-            humidity={currentWeather.humidity}
-            windSpeed={currentWeather.windSpeed}
-          />
+          {weather ? (
+            <WeatherCard
+              temperature={weather.temperature}
+              condition={weather.condition}
+            />
+          ) : (
+             <Card className="p-6 rounded-2xl bg-white h-full flex items-center justify-center">
+                 <p className="text-gray-400">Loading Weather...</p>
+             </Card>
+          )}
         </div>
 
         {/* 10-Day Forecast */}
         <Card className="lg:col-span-2 p-6 rounded-2xl bg-white">
           <h3 className="text-[#111827] mb-4">10-Day Forecast</h3>
           <div className="flex gap-3 overflow-x-auto pb-2">
-            {weatherForecast.map((day, index) => (
-              <div
-                key={index}
-                className="flex flex-col items-center gap-2 min-w-[80px] p-3 rounded-xl hover:bg-[#F9FAFB] transition-colors"
-              >
-                <span className="text-sm text-[#6B7280]">{day.day}</span>
-                {getWeatherIcon(day.icon)}
-                <span className="text-[#111827]">{day.temp}°C</span>
-              </div>
-            ))}
+            {forecast.length > 0 ? (
+                forecast.map((day, index) => (
+                  <div
+                    key={index}
+                    className="flex flex-col items-center gap-2 min-w-[80px] p-3 rounded-xl hover:bg-[#F9FAFB] transition-colors"
+                  >
+                    <span className="text-sm text-[#6B7280]">{day.day}</span>
+                    {getWeatherIcon(day.icon)}
+                    <span className="text-[#111827]">{day.temp}°C</span>
+                  </div>
+                ))
+            ) : (
+                <p className="text-gray-400 text-sm">Loading Forecast...</p>
+            )}
           </div>
         </Card>
       </div>
@@ -265,42 +349,66 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
 
         {/* Right Sidebar */}
         <div className="space-y-6">
-          {/* Critical Actions */}
-          <Card className="p-6 rounded-2xl bg-white border-l-4 border-l-[#DC2626]">
+          {/* Insight Recommendation (Replaces Critical Actions) */}
+          <Card className="p-6 rounded-2xl bg-gradient-to-br from-[#10B981] to-[#059669] text-white shadow-sm border-0">
             <div className="flex items-center gap-2 mb-4">
-              <AlertTriangle className="text-[#DC2626]" size={20} />
-              <h3 className="text-[#111827]">Critical Actions</h3>
+              <AlertTriangle className="text-white" size={20} />
+              <h3 className="text-white font-semibold">Insight Recommendations</h3>
             </div>
 
             <div className="space-y-3">
-              {criticalTasks.slice(0, 3).map((task) => (
-                <div
-                  key={task.id}
-                  className="p-3 bg-[#F9FAFB] rounded-xl hover:bg-[#E5E7EB] transition-colors cursor-pointer"
-                  onClick={() => onNavigate('reschedule')}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') onNavigate('reschedule');
-                  }}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <p className="text-sm text-[#111827]">{task.title}</p>
-                    <StatusBadge status={task.decision as 'Proceed' | 'Pending' | 'Stop'} size="sm" />
-                  </div>
-                  <p className="text-xs text-[#6B7280]">{task.plotName}</p>
-                  {task.reason && (
-                    <p className="text-xs text-[#6B7280] mt-2 italic">{task.reason}</p>
-                  )}
-                </div>
-              ))}
+              {weatherSuggestions.length > 0 ? (
+                weatherSuggestions.slice(0, 3).map((sugg, idx) => {
+                  let icon = '🌧️';
+                  if (sugg.type === 'DELAY') icon = '⏳';
+                  else if (sugg.type === 'TIME_SHIFT') icon = '🕘';
+                  else if (sugg.type === 'TRIGGER') icon = '🚨';
+                  else if (sugg.type === 'PRIORITY') icon = '🔥';
 
-              {criticalTasks.length === 0 && (
-                <p className="text-sm text-[#6B7280] text-center py-4">
-                  No critical actions currently
-                </p>
+                  return (
+                    <div
+                      key={idx}
+                      className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-colors border border-white/10 backdrop-blur-sm cursor-pointer"
+                      onClick={() => onNavigate('reschedule')} // Navigate to Reschedule Page on click
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-lg">{icon}</span>
+                        <p className="text-sm font-medium text-white line-clamp-1">
+                          {sugg.task_name}
+                        </p>
+                      </div>
+                      <p className="text-xs text-white/90 font-light leading-snug">
+                         {(sugg.type === 'TRIGGER' || sugg.type === 'PRIORITY') ? (
+                           <span>Action: <b>{sugg.task_name}</b></span>
+                         ) : (
+                           <span>Reschedule: <b>{sugg.original_date}</b> → <b>{sugg.suggested_date}</b></span>
+                         )}
+                        <br/>
+                        <span className="opacity-80 italic">{sugg.reason}</span>
+                      </p>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="p-4 text-center bg-white/10 rounded-xl">
+                  <p className="text-sm text-white/90">
+                    ✅ No immediate actions required.
+                  </p>
+                </div>
               )}
             </div>
+            {weatherSuggestions.length > 3 && (
+                <div className="mt-3 text-center">
+                    <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-white hover:bg-white/20 h-8 text-xs w-full"
+                        onClick={() => onNavigate('reschedule')}
+                    >
+                        View all ({weatherSuggestions.length})
+                    </Button>
+                </div>
+            )}
           </Card>
 
           {/* Upcoming Tasks */}

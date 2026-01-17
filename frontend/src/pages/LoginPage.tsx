@@ -34,19 +34,9 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     setLoading(true);
 
     try {
-      const res = await fetch('http://127.0.0.1:5001/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
-
-      if (!res.ok) {
-        const msg = await res.text();
-        throw new Error(msg || 'Invalid credentials');
-      }
-
-      const data = await res.json(); // { access_token, token_type }
-      console.log(data);
+      const data = await login(username, password);
+      console.log("Login success:", data);
+      
       sessionStorage.setItem("access_token", data.access_token);
       // optional: wipe any old persistent token
       localStorage.removeItem("access_token");
@@ -54,7 +44,8 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
       onLogin();
     } catch (err: any) {
-      setError('Login failed. Please check username/password.');
+      console.error(err);
+      setError(err.message || 'Login failed. Please check username/password.');
     } finally {
       setLoading(false);
     }
@@ -99,7 +90,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 />
                 <Input
                   id="username"
-                  type="username"
+                  type="text"
                   placeholder="Enter your username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
