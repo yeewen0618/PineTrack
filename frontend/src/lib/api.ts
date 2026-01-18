@@ -18,7 +18,10 @@ export async function getWeatherRescheduleSuggestions(
 }
 // src/lib/api.ts
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
+const API_BASE =
+  import.meta.env.VITE_API_URL ??
+  import.meta.env.VITE_API_BASE ??
+  "http://127.0.0.1:5001";
 
 export async function apiFetch<T>(
   path: string,
@@ -53,7 +56,7 @@ export async function apiFetch<T>(
 }
 
 export async function login(username: string, password: string) {
-  return apiFetch<{ access_token: string; token_type: string }>("/auth/login", {
+  return apiFetch<{ access_token: string; token_type: string; user?: User }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
@@ -121,6 +124,23 @@ export type Worker = {
   is_active?: boolean | null;
   created_at?: string | null;
 };
+
+export type User = {
+  id: number;
+  username: string;
+  email?: string | null;
+  full_name?: string | null;
+  role?: string | null;
+  created_at?: string | null;
+};
+
+function normalizeWorker(worker: any): Worker {
+  const rawId = worker?.id ?? worker?.worker_id;
+  return {
+    ...worker,
+    id: rawId == null ? "" : String(rawId),
+  } as Worker;
+}
 
 // ---------- Plots ----------
 export async function listPlots() {
@@ -201,18 +221,87 @@ export async function getTasksByPlotId(plotId: string): Promise<Task[]> {
   return res.data;
 }
 
+export async function updateTaskAssignment(payload: {
+  task_id: string;
+  assigned_worker_id: string | null;
+  assigned_worker_name: string | null;
+}) {
+  const res = await apiFetch<{ ok: true; data: RawBackendTask }>(
+    `/api/tasks/${encodeURIComponent(payload.task_id)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        assigned_worker_id: payload.assigned_worker_id,
+        assigned_worker_name: payload.assigned_worker_name,
+      }),
+    },
+  );
+
+  return {
+    ...res,
+    data: {
+      ...res.data,
+      decision: res.data.status as PlotStatus,
+    } as Task,
+  };
+}
+
 // ---------- Workers ----------
 export async function listWorkers() {
   const res = await apiFetch<{ ok: true; data: any[] }>("/api/workers");
-  const normalized = (res.data ?? []).map((worker) => {
-    const rawId = worker?.id ?? worker?.worker_id;
-    return {
-      ...worker,
-      id: rawId == null ? "" : String(rawId),
-    } as Worker;
-  });
+  const normalized = (res.data ?? []).map((worker) => normalizeWorker(worker));
 
   return { ...res, data: normalized };
+}
+
+export async function updateWorker(
+  workerId: string,
+  payload: { name?: string; role?: string | null; contact?: string | null; is_active?: boolean | null },
+) {
+  const res = await apiFetch<{ ok: true; data: any }>(
+    `/api/workers/${encodeURIComponent(workerId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+  );
+  return { ...res, data: normalizeWorker(res.data) };
+}
+
+export async function deleteWorker(workerId: string) {
+  return apiFetch<{ ok: true; deleted_worker_id: string }>(
+    `/api/workers/${encodeURIComponent(workerId)}`,
+    { method: "DELETE" },
+  );
+}
+
+// ---------- Users ----------
+export async function getCurrentUser() {
+  const res = await apiFetch<{ ok?: boolean; data?: User } | User>("/auth/me");
+  if ("data" in res && res.data) return res.data;
+  return res as User;
+}
+
+export async function updateUserProfile(
+  userId: string | number,
+  payload: { full_name?: string; email?: string | null },
+) {
+  const res = await apiFetch<{ ok?: boolean; data?: User } | User>(`/api/users/${encodeURIComponent(String(userId))}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  if ("data" in res && res.data) return res.data;
+  return res as User;
+}
+
+export async function changePassword(payload: {
+  current_password: string;
+  new_password: string;
+}) {
+  return apiFetch<{ ok: boolean; message?: string }>("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 // ---------- Reschedule Center ----------

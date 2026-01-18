@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "../components/ui/card";
 import { MapPin, Info } from "lucide-react";
@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { listPlots } from "../lib/api";
 import type { Plot } from "../lib/api";
 import { calcHarvestProgressPercent } from "../lib/progress";
+import { sortPlotsById } from "../lib/sortPlots";
 import { FarmSatelliteMap } from "../components/FarmSatelliteMap";
 
 interface FarmMapPageProps {
@@ -41,9 +42,10 @@ export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
       setLoading(true);
       try {
         const res = await listPlots();
-        setPlots(res.data ?? []);
-      } catch (e: any) {
-        toast.error(e?.message ?? "Failed to load plots");
+        setPlots(sortPlotsById(res.data ?? []));
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Failed to load plots";
+        toast.error(message);
       } finally {
         setLoading(false);
       }

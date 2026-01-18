@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -25,7 +25,6 @@ import type { Plot } from '../lib/api';
 import { Plus, Search, Edit, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePlot } from "../lib/api";
-import { apiFetch } from "../lib/api";
 
 
 
@@ -52,10 +51,9 @@ function calcHarvestProgressPercent(plantingDateISO: string, cycleDays = 420): n
 export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [plots, setPlots] = useState<Plot[]>([]);
-  const [loadingPlots, setLoadingPlots] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [selectedPlot, setSelectedPlot] = useState<any>(null);
+  const [selectedPlot, setSelectedPlot] = useState<Plot | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const defaultGrowthStage = 'Establishment';
   const [formData, setFormData] = useState({
@@ -66,7 +64,6 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
   });
 
   const loadPlots = async () => {
-    setLoadingPlots(true);
     try {
       const res = await listPlots();
       // Sort by created_at (oldest first) so newly added plots land at the bottom.
@@ -82,10 +79,8 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
       });
 
       setPlots(sortedPlots);
-    } catch (e: any) {
-      toast.error(e.message ?? 'Failed to load plots');
-    } finally {
-      setLoadingPlots(false);
+    } catch (e) {
+      toast.error((e as Error).message ?? 'Failed to load plots');
     }
   };
 
@@ -115,8 +110,8 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
       setIsAddDialogOpen(false);
       setFormData({ name: '', cropType: 'MD2 Pineapple', area: '', plantingDate: '' });
       loadPlots();
-    } catch (e: any) {
-      toast.error(e.message ?? 'Failed to create plot');
+    } catch (e) {
+      toast.error((e as Error).message ?? 'Failed to create plot');
     }
   };
 
@@ -143,13 +138,13 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
 
       // refresh plot list
       await loadPlots(); // ⬅️ your existing fetch function
-    } catch (err: any) {
-      toast.error(err?.message ?? "Failed to delete plot");
+    } catch (err) {
+      toast.error((err as Error)?.message ?? "Failed to delete plot");
     }
   };
 
 
-  const handleEditClick = (plot: any, e: React.MouseEvent) => {
+  const handleEditClick = (plot: Plot, e: React.MouseEvent) => {
     e.stopPropagation();
     setSelectedPlot(plot);
     setFormData({
@@ -187,9 +182,9 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
       setSelectedPlot(null);
       setFormData({ name: '', cropType: 'MD2 Pineapple', area: '', plantingDate: '' });
       await loadPlots();
-    } catch (err: any) {
+    } catch (err) {
       console.error('Failed to update plot:', err);
-      toast.error(err?.message ?? 'Failed to update plot');
+      toast.error((err as Error)?.message ?? 'Failed to update plot');
     } finally {
       setIsSaving(false);
     }

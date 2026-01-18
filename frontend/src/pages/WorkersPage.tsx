@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -14,9 +14,9 @@ import {
 } from '../components/ui/dialog';
 import { Plus, Search, Phone, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useEffect } from "react";
 import { listPlots, listTasks, listWorkers } from "../lib/api";
 import type { Plot, Task, Worker } from "../lib/api";
+import { WorkerManageDialog } from "../components/workers/WorkerManageDialog";
 
 export function WorkersPage() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -24,6 +24,8 @@ export function WorkersPage() {
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [plots, setPlots] = useState<Plot[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedWorker, setSelectedWorker] = useState<Worker | null>(null);
+  const [manageDialogOpen, setManageDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     role: 'Field Worker',
@@ -42,8 +44,8 @@ export function WorkersPage() {
         setWorkers(workersRes.data ?? []);
         setPlots(plotsRes.data ?? []);
         setTasks(tasksRes.data ?? []);
-      } catch (err: any) {
-        toast.error(err?.message ?? "Failed to load workers data");
+      } catch (err: Error | unknown) {
+        toast.error(err instanceof Error ? err.message : "Failed to load workers data");
       } finally {
         // no-op: keep rendering current data
       }
@@ -79,6 +81,22 @@ export function WorkersPage() {
   const plotsById = useMemo(() => {
     return new Map(plots.map((plot) => [plot.id, plot]));
   }, [plots]);
+
+  const handleWorkerUpdated = (updatedWorker: Worker) => {
+    setWorkers((prev) =>
+      prev.map((worker) => (worker.id === updatedWorker.id ? updatedWorker : worker)),
+    );
+    setSelectedWorker(updatedWorker);
+  };
+
+  const handleWorkerDeleted = (workerId: string) => {
+    setWorkers((prev) => prev.filter((worker) => worker.id !== workerId));
+    setSelectedWorker(null);
+  };
+
+  const handleTaskUpdated = (updatedTask: Task) => {
+    setTasks((prev) => prev.map((task) => (task.id === updatedTask.id ? updatedTask : task)));
+  };
 
   const handleAddWorker = (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,7 +242,23 @@ export function WorkersPage() {
           );
 
           return (
-            <Card key={worker.id} className="p-6 rounded-2xl bg-white hover:shadow-lg transition-shadow">
+            <Card
+              key={worker.id}
+              className="p-6 rounded-2xl bg-white border border-transparent hover:border-[#BBF7D0] hover:shadow-lg transition-all cursor-pointer"
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                setSelectedWorker(worker);
+                setManageDialogOpen(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  setSelectedWorker(worker);
+                  setManageDialogOpen(true);
+                }
+              }}
+              aria-label={`Manage ${worker.name}`}
+            >
               {/* Worker Header */}
               <div className="flex items-start gap-4 mb-4">
                 <Avatar>
@@ -297,6 +331,20 @@ export function WorkersPage() {
           );
         })}
       </div>
+
+      <WorkerManageDialog
+        worker={selectedWorker}
+        open={manageDialogOpen}
+        onOpenChange={(open) => {
+          setManageDialogOpen(open);
+          if (!open) setSelectedWorker(null);
+        }}
+        tasks={tasks}
+        plotsById={plotsById}
+        onUpdated={handleWorkerUpdated}
+        onDeleted={handleWorkerDeleted}
+        onTaskUpdated={handleTaskUpdated}
+      />
     </div>
   );
 }

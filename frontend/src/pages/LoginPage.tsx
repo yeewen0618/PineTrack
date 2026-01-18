@@ -6,6 +6,7 @@ import { Card } from '../components/ui/card';
 import { Sprout, Mail, Lock } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { login } from "../lib/api";
+import { writeStoredUser } from "../lib/userStorage";
 
 
 interface LoginPageProps {
@@ -40,12 +41,49 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       sessionStorage.setItem("access_token", data.access_token);
       // optional: wipe any old persistent token
       localStorage.removeItem("access_token");
+      if (data.user) {
+        writeStoredUser(data.user);
+      }
 
 
       onLogin();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || 'Login failed. Please check username/password.');
+      let errorMessage = 'Login failed. Please check username/password.';
+
+      if (err instanceof Error) {
+        const rawMessage = err.message || '';
+        let parsedDetail = '';
+        try {
+          const parsed = JSON.parse(rawMessage) as { detail?: string };
+          if (parsed?.detail) parsedDetail = parsed.detail;
+        } catch {
+          // ignore JSON parse errors
+        }
+
+        const message = parsedDetail || rawMessage;
+        const normalized = message.toLowerCase();
+
+        if (
+          normalized.includes('failed to fetch') ||
+          normalized.includes('networkerror') ||
+          normalized.includes('load failed')
+        ) {
+          errorMessage =
+            'Cannot reach server. Check backend is running and VITE_API_URL.';
+        } else if (
+          normalized.includes('invalid username or password') ||
+          normalized.includes('401')
+        ) {
+          errorMessage = 'Invalid username or password';
+        } else if (normalized.includes('500') || normalized.includes('server error')) {
+          errorMessage = 'Server error. Please try again.';
+        } else if (message.trim()) {
+          errorMessage = message;
+        }
+      }
+
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

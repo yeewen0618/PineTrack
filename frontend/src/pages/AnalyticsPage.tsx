@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card } from '../components/ui/card';
 import {
   Select,
@@ -11,6 +11,7 @@ import {
 import { getAnalyticsHistory, getAnalyticsForecast, getWeatherAnalytics, listTasks, getWeatherRescheduleSuggestions } from '../lib/api';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { SensorAnalyticsTabs } from '../components/analytics/SensorAnalyticsTabs';
+import { InsightRecommendationsCard } from '../components/insights/InsightRecommendationsCard';
 import type { AnalyticsData, WeatherAnalyticsItem, ForecastRange } from '../components/analytics/SensorAnalyticsTabs';
 
 interface Suggestion {
@@ -220,48 +221,11 @@ export function AnalyticsPage() {
           onForecastRangeChange={setForecastRange}
         />
       </Card>
-
       {/* Insight Recommendation (Weather-based) */}
-      <Card className="p-6 rounded-2xl bg-gradient-to-br from-[#10B981] to-[#059669] text-white shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-           <h3 className="text-[18px] font-semibold">Insight Recommendation</h3>
-        </div>
-        <div className="space-y-3">
-          {weatherSuggestions.length > 0 ? (
-            weatherSuggestions.map((sugg, idx) => {
-              let icon = '🌧️';
-              if (sugg.type === 'DELAY') icon = '⏳';
-              else if (sugg.type === 'TIME_SHIFT') icon = '🕘';
-              else if (sugg.type === 'TRIGGER') icon = '🚨';
-              else if (sugg.type === 'PRIORITY') icon = '🔥';
-
-              return (
-              <div key={idx} className="bg-white/10 rounded-xl p-4 shadow-sm border border-white/10 backdrop-blur-sm">
-                <div className="flex items-center gap-2 mb-1">
-                  <p className="text-[16px] font-medium opacity-95">
-                    {icon} {sugg.task_name} {sugg.task_id && !String(sugg.task_id).includes('trigger') && `(ID: ${sugg.task_id})`}
-                  </p>
-                </div>
-                <p className="text-[14px] opacity-90 leading-relaxed font-light">
-                   {(sugg.type === 'TRIGGER' || sugg.type === 'PRIORITY') ? (
-                     <span>Action Required: <b>{sugg.task_name}</b></span>
-                   ) : (
-                     <span>Suggest reschedule from <b>{sugg.original_date}</b> to <b>{sugg.suggested_date}</b>.</span>
-                   )}
-                  <br/>
-                  Reason: {sugg.reason}
-                </p>
-              </div>
-              );
-            })
-          ) : (
-            <div className="bg-white/10 rounded-xl p-4 text-center">
-              <p className="opacity-90">No Actionable Insight Required</p>
-              <p className="text-sm opacity-70 mt-1">All tasks are safe to proceed.</p>
-            </div>
-          )}
-        </div>
-      </Card>
+      <InsightRecommendationsCard
+        variant="analytics"
+        suggestions={weatherSuggestions}
+      />
     </div>
   );
 }

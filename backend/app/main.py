@@ -20,6 +20,7 @@ from app.routers import schedule
 from app.routers import plots
 from app.routers import tasks
 from app.routers import suggestions
+from app.routers import users
 
 
 app = FastAPI(title="PineTrack Backend")
@@ -55,7 +56,8 @@ app.include_router(schedule.router)
 app.include_router(plots.router)
 app.include_router(tasks.router)
 app.include_router(suggestions.router)
+app.include_router(users.router)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="127.0.0.1", port=5001, reload=True)

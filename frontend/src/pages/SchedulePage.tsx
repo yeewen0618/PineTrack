@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { StatusBadge } from '../components/StatusBadge';
-import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -20,7 +20,7 @@ import {
 } from '../components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { toast } from 'sonner';
-import { useParams } from "react-router-dom";
+// import { useParams } from "react-router-dom";
 import { listPlots, listTasks } from '../lib/api';
 import type { Plot } from '../lib/api';
 
@@ -44,7 +44,7 @@ export function SchedulePage() {
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>("month");
-  const [selectedTask, setSelectedTask] = useState<any>(null);
+  const [selectedTask, setSelectedTask] = useState<ScheduleTaskVM | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const [plots, setPlots] = useState<Plot[]>([]);
@@ -69,7 +69,17 @@ export function SchedulePage() {
 
         const nameById = new Map(plotsData.map((p) => [p.id, p.name]));
 
-        const vm: ScheduleTaskVM[] = (tasksRes.data ?? []).map((t: any) => ({
+        const vm: ScheduleTaskVM[] = (tasksRes.data ?? []).map((t: {
+          id: string;
+          title: string;
+          decision?: "Proceed" | "Pending" | "Stop";
+          status?: "Proceed" | "Pending" | "Stop";
+          task_date: string;
+          plot_id: string;
+          description?: string | null;
+          assigned_worker_name?: string | null;
+          reason?: string | null;
+        }) => ({
           id: t.id,
           title: t.title,
           status: t.decision ?? t.status,
@@ -85,8 +95,8 @@ export function SchedulePage() {
 
         // ✅ ensure default filter stays global
         setFilterPlot("all");
-      } catch (e: any) {
-        toast.error(e?.message ?? "Failed to load schedule data");
+      } catch (e) {
+        toast.error((e as Error)?.message ?? "Failed to load schedule data");
       } finally {
         setLoading(false);
       }
@@ -97,7 +107,7 @@ export function SchedulePage() {
 
 
   // Generate calendar days for month view
-  const getMonthCalendarDays = () => {
+  const getMonthCalendarDays = useCallback(() => {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
 
@@ -117,9 +127,9 @@ export function SchedulePage() {
     }
 
     return days;
-  };
+  }, [year, month]);
 
-  const getTasksForDate = (dateStr: string) => {
+  const getTasksForDate = useCallback((dateStr: string) => {
     let tasksForDate = tasks.filter((task) => task.date === dateStr);
 
     if (filterPlot !== 'all') {
@@ -130,12 +140,12 @@ export function SchedulePage() {
     }
 
     return tasksForDate;
-  };
+  }, [tasks, filterPlot, filterStatus]);
 
   const selectedDateTasks = useMemo(() => {
     if (!selectedDate) return [];
     return getTasksForDate(selectedDate);
-  }, [selectedDate, tasks, filterPlot, filterStatus]);
+  }, [selectedDate, getTasksForDate]);
 
   const getTasksForDay = (d: number) => {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -223,7 +233,7 @@ export function SchedulePage() {
     return weekTasks;
   };
 
-  const days = useMemo(() => getMonthCalendarDays(), [year, month, tasks, filterPlot, filterStatus]);
+  const days = useMemo(() => getMonthCalendarDays(), [getMonthCalendarDays]);
 
   return (
     <div className="space-y-6">
