@@ -6,12 +6,23 @@ from datetime import timedelta
 import math
 from app.core.supabase_client import supabase
 
-def generate_forecasts(days: int = 7):
+def generate_forecasts(days: int = 7, plot_id: str = None):
     """
     Generates future forecasts for the specified number of days.
-    Returns a list of dicts: [{date: '2024-01-01', temperature: 25.5, ...}]
+    Args:
+        days (int): Number of days to forecast (default: 7)
+        plot_id (str, optional): Filter data by specific plot (e.g., 'A1'). 
+                                 If None, uses all available data.
+    Returns: 
+        list of dicts: [{date: '2024-01-01', temperature: 25.5, ...}]
     """
-    response = supabase.table("cleaned_data").select("*").order("data_added", desc=True).limit(2000).execute()
+    query = supabase.table("cleaned_data").select("*")
+    
+    # Filter by plot if specified
+    if plot_id:
+        query = query.eq("plot_id", plot_id)
+    
+    response = query.order("data_added", desc=True).limit(2000).execute()
     data = response.data
     
     if not data:
@@ -21,7 +32,7 @@ def generate_forecasts(days: int = 7):
     df['data_added'] = pd.to_datetime(df['data_added'])
     df = df.sort_values('data_added').reset_index(drop=True)
 
-    sensors = ['temperature', 'soil_moisture', 'nitrogen']
+    sensors = ['temperature', 'soil_moisture']
     forecast_results = {} # sensor -> [values]
     
     last_known_timestamp = df['data_added'].iloc[-1]
@@ -88,7 +99,12 @@ def generate_forecasts(days: int = 7):
     # Aggregate results into list of objects
     final_output = []
     
-    # We'll use a default device_id, or take the first one from the training data if available
+    # Use plot_id from parameter or get from training data
+    default_plot_id = plot_id if plot_id else 'A1'
+    if not df.empty and 'plot_id' in df.columns:
+        default_plot_id = df['plot_id'].iloc[0]
+    
+    # Keep device_id for backward compatibility
     default_device_id = 1
     if not df.empty and 'device_id' in df.columns:
         default_device_id = int(df['device_id'].iloc[0])
@@ -96,11 +112,11 @@ def generate_forecasts(days: int = 7):
     for i, ts in enumerate(future_timestamps):
         entry = {
             "forecast_time": ts.isoformat(),
+            "plot_id": default_plot_id,
             "device_id": default_device_id,
             "created_at": pd.Timestamp.now().isoformat(),
             "temperature": float(forecast_results.get("temperature", [0]*len(future_timestamps))[i]),
-            "soil_moisture": float(forecast_results.get("soil_moisture", [0]*len(future_timestamps))[i]),
-            "nitrogen": float(forecast_results.get("nitrogen", [0]*len(future_timestamps))[i])
+            "soil_moisture": float(forecast_results.get("soil_moisture", [0]*len(future_timestamps))[i])
         }
         final_output.append(entry)
     
@@ -134,8 +150,7 @@ def generate_forecasts(days: int = 7):
         {
             "date": item["forecast_time"], 
             "temperature": item["temperature"],
-            "soil_moisture": item["soil_moisture"],
-            "nitrogen": item["nitrogen"]
+            "soil_moisture": item["soil_moisture"]
         } 
         for item in final_output
     ]
@@ -161,7 +176,7 @@ def forecast_pipeline():
     df['data_added'] = pd.to_datetime(df['data_added'])
     df = df.sort_values('data_added').reset_index(drop=True)
 
-    sensors = ['temperature', 'soil_moisture', 'nitrogen']
+    sensors = ['temperature', 'soil_moisture']
     
     # --- 2. TRAIN & EVALUATE FOR EACH SENSOR ---
     # We will use 80% for training and 20% for testing to calculate errors

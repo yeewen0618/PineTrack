@@ -2,7 +2,7 @@
 export async function getWeatherRescheduleSuggestions(
   tasks: Task[], 
   weatherForecast: Record<string, unknown>[], 
-  sensorSummary?: { avg_n: number; avg_moisture: number; avg_temp: number }
+  sensorSummary?: { avg_moisture: number; avg_temp: number }
 ) {
   const res = await fetch(`${API_BASE}/suggestions/weather-reschedule`, {
     method: "POST",
@@ -219,8 +219,13 @@ export async function rejectReschedule(taskId: string) {
   } as { ok: true; data: Task };
 }
 
-export async function getAnalyticsHistory(days: number = 30) {
-  const res = await fetch(`${API_BASE}/analytics/history?days=${days}`, {
+export async function getAnalyticsHistory(days: number = 30, plotId?: string) {
+  let url = `${API_BASE}/analytics/history?days=${days}`;
+  if (plotId && plotId !== 'all') {
+    url += `&plot_id=${plotId}`;
+  }
+  
+  const res = await fetch(url, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
@@ -236,10 +241,15 @@ export async function getAnalyticsHistory(days: number = 30) {
   return res.json();
 }
 
-export async function getAnalyticsForecast(days: number = 7) {
+export async function getAnalyticsForecast(days: number = 7, plotId?: string) {
   // Map friendly strings to integers if passed (e.g. '1W' -> 7 handled in component, or here)
   // For now expecting integer
-  const res = await fetch(`${API_BASE}/analytics/forecast?days=${days}`, {
+  let url = `${API_BASE}/analytics/forecast?days=${days}`;
+  if (plotId && plotId !== 'all') {
+    url += `&plot_id=${plotId}`;
+  }
+  
+  const res = await fetch(url, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
@@ -270,5 +280,46 @@ export async function getDashboardWeather() {
   });
 
   if (!res.ok) throw new Error("Failed to fetch dashboard weather");
+  return res.json();
+}
+
+// ---------- Configuration / Thresholds ----------
+export interface Thresholds {
+  id: number;
+  temperature_min: number;
+  temperature_max: number;
+  soil_moisture_min: number;
+  soil_moisture_max: number;
+  updated_at: string;
+}
+
+export async function getThresholds(): Promise<Thresholds> {
+  const res = await fetch(`${API_BASE}/config/thresholds`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" }
+  });
+  
+  if (!res.ok) throw new Error("Failed to fetch thresholds");
+  return res.json();
+}
+
+export async function updateThresholds(data: Partial<Omit<Thresholds, 'id' | 'updated_at'>>) {
+  const res = await fetch(`${API_BASE}/config/thresholds`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  
+  if (!res.ok) throw new Error("Failed to update thresholds");
+  return res.json();
+}
+
+export async function resetThresholds() {
+  const res = await fetch(`${API_BASE}/config/thresholds/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+  
+  if (!res.ok) throw new Error("Failed to reset thresholds");
   return res.json();
 }

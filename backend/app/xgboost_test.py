@@ -26,7 +26,7 @@ def forecast_pipeline():
     df['data_added'] = pd.to_datetime(df['data_added'])
     df = df.sort_values('data_added').reset_index(drop=True)
 
-    sensors = ['temperature', 'soil_moisture', 'nitrogen']
+    sensors = ['temperature', 'soil_moisture']
     
     for sensor in sensors:
         print(f"\n📊 --- Evaluating XGBoost Model for: {sensor.upper()} ---")

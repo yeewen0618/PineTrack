@@ -60,6 +60,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const [weather, setWeather] = useState<CurrentWeather | null>(null);
   const [forecast, setForecast] = useState<ForecastDay[]>([]);
   const [weatherSuggestions, setWeatherSuggestions] = useState<Suggestion[]>([]);
+  const [sensorAlerts, setSensorAlerts] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
 
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -150,7 +151,14 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
          const tasksForTomorrow = tasksData.filter((t) => t.task_date === tomorrowStr);
          
          const result = await getWeatherRescheduleSuggestions(tasksForTomorrow, weatherForecastForTomorrow, sensorSummary);
-         setWeatherSuggestions(result.suggestions ?? []);
+         const allSuggestions = result.suggestions ?? [];
+         
+         // Separate sensor alerts from regular suggestions
+         const alerts = allSuggestions.filter(s => s.affected_by === 'sensor_health');
+         const suggestions = allSuggestions.filter(s => s.affected_by !== 'sensor_health');
+         
+         setSensorAlerts(alerts);
+         setWeatherSuggestions(suggestions);
 
       } catch (err) {
          console.error("Insight fetch failed", err);
@@ -349,6 +357,35 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
 
         {/* Right Sidebar */}
         <div className="space-y-6">
+          {/* Sensor Health Alerts */}
+          {sensorAlerts.length > 0 && (
+            <Card className="p-6 rounded-2xl bg-gradient-to-br from-[#DC2626] to-[#B91C1C] text-white shadow-sm border-0">
+              <div className="flex items-center gap-2 mb-4">
+                <AlertTriangle className="text-white" size={20} />
+                <h3 className="text-white font-semibold">Alert</h3>
+              </div>
+
+              <div className="space-y-3">
+                {sensorAlerts.map((alert, idx) => (
+                  <div
+                    key={idx}
+                    className="p-4 bg-white/10 rounded-xl hover:bg-white/20 transition-colors border border-white/20 backdrop-blur-sm"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xl">⚠️</span>
+                      <p className="text-base font-semibold text-white">
+                        {alert.task_name}
+                      </p>
+                    </div>
+                    <p className="text-sm text-white/95 font-normal leading-relaxed">
+                      {alert.reason}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
           {/* Insight Recommendation (Replaces Critical Actions) */}
           <Card className="p-6 rounded-2xl bg-gradient-to-br from-[#10B981] to-[#059669] text-white shadow-sm border-0">
             <div className="flex items-center gap-2 mb-4">

@@ -42,9 +42,12 @@ def get_dashboard_weather_data():
 
 
 @router.get("/forecast")
-def get_forecast_data(days: int = 7):
+def get_forecast_data(days: int = 7, plot_id: str = None):
     """
     Generate future forecasts using the AI model.
+    Args:
+        days (int): Number of days to forecast
+        plot_id (str, optional): Filter by specific plot (e.g., 'A1')
     Cached for 1 hour to improve performance.
     """
     try:
@@ -56,17 +59,20 @@ def get_forecast_data(days: int = 7):
         current_time = time.time()
         if (FORECAST_CACHE["data"] is not None and 
             FORECAST_CACHE["days_param"] == days and
+            FORECAST_CACHE.get("plot_id") == plot_id and
             (current_time - FORECAST_CACHE["timestamp"]) < CACHE_DURATION_SECONDS):
             print("🚀 Returning Cached Forecast Data")
             return FORECAST_CACHE["data"]
 
-        print("⚡ Generating New Forecast (This might take a moment)...")
-        data = generate_forecasts(days)
+        plot_msg = f" for plot {plot_id}" if plot_id else ""
+        print(f"⚡ Generating New Forecast{plot_msg} (This might take a moment)...")
+        data = generate_forecasts(days, plot_id)
         
         # Update Cache
         FORECAST_CACHE["data"] = data
         FORECAST_CACHE["timestamp"] = current_time
         FORECAST_CACHE["days_param"] = days
+        FORECAST_CACHE["plot_id"] = plot_id
         
         return data
     except Exception as e:
@@ -76,9 +82,12 @@ def get_forecast_data(days: int = 7):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/history")
-def get_historical_data(days: int = 30):
+def get_historical_data(days: int = 30, plot_id: str = None):
     """
     Fetch historical data (raw and cleaned) for charts.
+    Args:
+        days (int): Number of days of history
+        plot_id (str, optional): Filter by specific plot (e.g., 'A1')
     """
     try:
         # Calculate limit based on days (assuming ~24 records per day per device)
@@ -86,7 +95,13 @@ def get_historical_data(days: int = 30):
         # Ideally, we filter by 'data_added' > (now - days)
         
         # For now, let's just fetch the last 1000 records to ensure we have enough points
-        response = supabase.table("cleaned_data").select("*").order("data_added", desc=True).limit(1000).execute()
+        query = supabase.table("cleaned_data").select("*")
+        
+        # Filter by plot if specified
+        if plot_id:
+            query = query.eq("plot_id", plot_id)
+        
+        response = query.order("data_added", desc=True).limit(1000).execute()
         
         # Reverse to have chronological order for the chart
         data = response.data[::-1] 

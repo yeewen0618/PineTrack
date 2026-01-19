@@ -31,8 +31,6 @@ interface AnalyticsData {
   temperature_clean: number;
   moisture_raw: number;
   moisture_clean: number;
-  nitrogen_raw: number;
-  nitrogen_clean: number;
   // allow other props for flexibility
   [key: string]: unknown;
 }
@@ -61,6 +59,7 @@ export function AnalyticsPage() {
   const [forecastData, setForecastData] = useState<unknown[]>([]); // Forecast structure might vary
   const [weatherData, setWeatherData] = useState<WeatherAnalyticsItem[]>([]);
   const [weatherSuggestions, setWeatherSuggestions] = useState<Suggestion[]>([]);
+  const [sensorAlerts, setSensorAlerts] = useState<Suggestion[]>([]);
   // const [loading, setLoading] = useState(true);
 
   // Fetch real data on mount and when forecast range changes
@@ -83,27 +82,29 @@ export function AnalyticsPage() {
           cleaned_temperature: number;
           soil_moisture: number;
           cleaned_soil_moisture: number;
-          nitrogen: number;
-          cleaned_nitrogen: number;
           [key: string]: unknown;
         }
 
-        const history = await safeFetch<RawBackendHistory[]>(getAnalyticsHistory(30) as unknown as Promise<RawBackendHistory[]>, []);
+        const history = await safeFetch<RawBackendHistory[]>(
+          getAnalyticsHistory(30, selectedPlot !== 'all' ? selectedPlot : undefined) as unknown as Promise<RawBackendHistory[]>, 
+          []
+        );
         const processedHistory: AnalyticsData[] = history.map((item) => ({
           ...item,
           date: item.data_added,
           temperature_raw: item.temperature,
           temperature_clean: item.cleaned_temperature,
           moisture_raw: item.soil_moisture,
-          moisture_clean: item.cleaned_soil_moisture,
-          nitrogen_raw: item.nitrogen,
-          nitrogen_clean: item.cleaned_nitrogen,
+          moisture_clean: item.cleaned_soil_moisture
         }));
         setHistoricalData(processedHistory);
 
-        // 2. Fetch Forecast
+        // 2. Fetch Forecast (filter by selected plot)
         const days = 7;
-        const forecast = await safeFetch<unknown[]>(getAnalyticsForecast(days), []);
+        const forecast = await safeFetch<unknown[]>(
+          getAnalyticsForecast(days, selectedPlot !== 'all' ? selectedPlot : undefined), 
+          []
+        );
         setForecastData(forecast);
 
         // 3. Fetch Recommendations - Removed
@@ -133,7 +134,6 @@ export function AnalyticsPage() {
         if (processedHistory.length > 0) {
            const latest = processedHistory[processedHistory.length - 1];
            sensorSummary = {
-             avg_n: latest.nitrogen_clean,
              avg_moisture: latest.moisture_clean,
              avg_temp: latest.temperature_clean
            };
@@ -149,7 +149,13 @@ export function AnalyticsPage() {
             // but the new backend logic can handle generally.
             // Ideally we pass a broader range of tasks. 
             const result = await getWeatherRescheduleSuggestions(tasksForTomorrow, weatherForecastForTomorrow, sensorSummary);
-            suggestions = result.suggestions ?? [];
+            const allSuggestions = result.suggestions ?? [];
+            
+            // Separate sensor alerts from regular suggestions
+            const alerts = allSuggestions.filter(s => s.affected_by === 'sensor_health');
+            suggestions = allSuggestions.filter(s => s.affected_by !== 'sensor_health');
+            
+            setSensorAlerts(alerts);
         } catch (e) {
             console.error("Insight suggestion error:", e);
         }
@@ -162,24 +168,37 @@ export function AnalyticsPage() {
       }
     }
     fetchData();
-  }, [forecastRange]);
+  }, [forecastRange, selectedPlot]);
 
 
-  // Calculate trends safely
-  const calculateTrend = (key: string) => {
-    if (historicalData.length < 2) return 0;
-    const lastItem = historicalData[historicalData.length - 1];
-    const firstItem = historicalData[0];
-    
-    // Explicitly cast to number to avoid TS arithmetic error on 'unknown'
-    const last = Number(lastItem[key]) || 0;
-    const first = Number(firstItem[key]) || 0;
-    
-    return last - first;
+  // Get today's readings (latest available data)
+  const getTodayReading = (key: string) => {
+    if (historicalData.length === 0) return 0;
+    const latest = historicalData[historicalData.length - 1];
+    return Number(latest[key]) || 0;
   };
 
-  const moistureTrend = calculateTrend('moisture_clean');
-  const nitrogenTrend = calculateTrend('nitrogen_clean');
+  const todayMoisture = getTodayReading('moisture_clean');
+  const todayTemperature = getTodayReading('temperature_clean');
+
+  // Get today's weather (sum of rain for latest day)
+  const todayWeatherRain = useMemo(() => {
+    if (weatherData.length === 0) return 0;
+    
+    // Get latest date from weather data
+    const latestDate = weatherData
+      .filter(d => d.time || d.date)
+      .map(d => String(d.time || d.date).substring(0, 10))
+      .sort()
+      .reverse()[0];
+    
+    if (!latestDate) return 0;
+    
+    // Sum all rain for that day
+    return weatherData
+      .filter(d => String(d.time || d.date).substring(0, 10) === latestDate)
+      .reduce((sum, item) => sum + (Number(item.rain) || 0), 0);
+  }, [weatherData]);
 
   // Split and aggregate weather data for Historical (Daily Sum)
   const weatherHistorical = useMemo(() => {
@@ -253,51 +272,89 @@ export function AnalyticsPage() {
         </Select>
       </div>
 
-      {/* Trend Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Today's Reading Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Moisture */}
         <Card className="p-5 rounded-2xl bg-white shadow-sm">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-[14px] text-[#6B7280]">Moisture Trend</p>
-            {moistureTrend > 0 ? (
-              <TrendingUp className="text-[#16A34A]" size={20} />
-            ) : (
-              <TrendingDown className="text-[#DC2626]" size={20} />
-            )}
+            <p className="text-[14px] text-[#6B7280]">Soil Moisture</p>
+            <div className="w-8 h-8 bg-[#16A34A] rounded-lg flex items-center justify-center text-white">
+              💧
+            </div>
           </div>
-          <p className="text-[20px] text-[#111827] mb-1">
-            {historicalData.length > 0 ? (historicalData[historicalData.length - 1].moisture_clean || 0).toFixed(1) : '--'}%
+          <p className="text-[28px] font-semibold text-[#111827] mb-1">
+            {todayMoisture.toFixed(1)}%
           </p>
-          <p className={`text-[14px] ${moistureTrend > 0 ? 'text-[#16A34A]' : 'text-[#DC2626]'}`}>
-            {moistureTrend > 0 ? '+' : ''}
-            {moistureTrend.toFixed(1)}% from start
+          <p className="text-[12px] text-[#6B7280]">
+            Latest reading
           </p>
         </Card>
 
+        {/* Temperature */}
         <Card className="p-5 rounded-2xl bg-white shadow-sm">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-[14px] text-[#6B7280]">Nitrogen Trend</p>
-            {nitrogenTrend > 0 ? (
-              <TrendingUp className="text-[#16A34A]" size={20} />
-            ) : (
-              <TrendingDown className="text-[#DC2626]" size={20} />
-            )}
+            <p className="text-[14px] text-[#6B7280]">Temperature</p>
+            <div className="w-8 h-8 bg-[#DC2626] rounded-lg flex items-center justify-center text-white">
+              🌡️
+            </div>
           </div>
-          <p className="text-[20px] text-[#111827] mb-1">
-            {historicalData.length > 0 ? (historicalData[historicalData.length - 1].nitrogen_clean || 0).toFixed(0) : '--'} mg/kg
+          <p className="text-[28px] font-semibold text-[#111827] mb-1">
+            {todayTemperature.toFixed(1)}°C
           </p>
-          <p className={`text-[14px] ${nitrogenTrend > 0 ? 'text-[#16A34A]' : 'text-[#DC2626]'}`}>
-            {nitrogenTrend > 0 ? '+' : ''}
-            {nitrogenTrend.toFixed(0)} mg/kg from start
+          <p className="text-[12px] text-[#6B7280]">
+            Latest reading
+          </p>
+        </Card>
+
+        {/* Weather (Rain) */}
+        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[14px] text-[#6B7280]">Rainfall Today</p>
+            <div className="w-8 h-8 bg-[#3B82F6] rounded-lg flex items-center justify-center text-white">
+              🌧️
+            </div>
+          </div>
+          <p className="text-[28px] font-semibold text-[#111827] mb-1">
+            {todayWeatherRain.toFixed(1)} mm
+          </p>
+          <p className="text-[12px] text-[#6B7280]">
+            Total rainfall
           </p>
         </Card>
       </div>
+
+      {/* Sensor Health Alerts */}
+      {sensorAlerts.length > 0 && (
+        <div className="space-y-2">
+          {sensorAlerts.map((alert, idx) => (
+            <div
+              key={idx}
+              className="bg-gradient-to-r from-[#FEE2E2] to-[#FECACA] border-l-4 border-[#DC2626] rounded-lg p-4 shadow-sm"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-8 h-8 bg-[#DC2626] rounded-full flex items-center justify-center text-white text-lg">
+                  ⚠️
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-[16px] font-semibold text-[#991B1B] mb-1">
+                    {alert.task_name}
+                  </h4>
+                  <p className="text-[14px] text-[#7C2D12] leading-relaxed">
+                    {alert.reason}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Detailed Charts */}
       <Card className="p-6 rounded-2xl bg-white shadow-sm">
         <Tabs defaultValue="moisture" className="w-full">
           <TabsList
             className="
-    grid w-full grid-cols-4 gap-2
+    grid w-full grid-cols-3 gap-2
     bg-transparent rounded-2xl mb-6
   "
           >
@@ -314,21 +371,6 @@ export function AnalyticsPage() {
     "
             >
               Moisture
-            </TabsTrigger>
-
-            <TabsTrigger
-              value="nitrogen"
-              className="
-      rounded-xl px-3 py-2 text-sm
-      text-[#6B7280]
-      hover:bg-[#F3FFF7]
-      data-[state=active]:bg-[#DCFCE7]
-      data-[state=active]:text-[#15803D]
-      data-[state=active]:shadow-sm
-      transition-colors
-    "
-            >
-              Nitrogen
             </TabsTrigger>
 
             <TabsTrigger
@@ -473,106 +515,6 @@ export function AnalyticsPage() {
           </TabsContent>
 
 
-
-          <TabsContent value="nitrogen" className="mt-0">
-            <h3 className="text-[20px] text-[#111827] mb-6">Nitrogen Content Analysis</h3>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Historical Data Chart */}
-              <div className="bg-[#F9FAFB] rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.08)] flex flex-col">
-                <div className="h-[60px] flex items-start mb-4">
-                  <h4 className="text-[18px] text-[#111827]">Historical Data (Last 20 Days)</h4>
-                </div>
-                <ResponsiveContainer width="100%" height={320}>
-                  <AreaChart data={historicalData}>
-                    <defs>
-                      <linearGradient id="nitrogenCleanGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#16A34A" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#16A34A" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis
-                      dataKey="date"
-                      stroke="#6B7280"
-                      fontSize={12}
-                      tickFormatter={formatXAxis}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      stroke="#6B7280"
-                      fontSize={12}
-                      label={{ value: 'mg/kg', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
-                    />
-                    <Tooltip
-                      contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
-                      labelFormatter={formatXAxis}
-                      labelStyle={{ color: '#111827' }}
-                    />
-                    <Legend verticalAlign="top" height={36}/>
-                    {/* Render Cleaned Data FIRST (Background Area) */}
-                    <Area
-                      type="monotone"
-                      dataKey="nitrogen_clean"
-                      stroke="#16A34A"
-                      fill="url(#nitrogenCleanGradient)"
-                      strokeWidth={2}
-                      name="Cleaned Data"
-                    />
-                    {/* Render Raw Data SECOND (Foreground Line) - Red for visibility */}
-                    <Area
-                      type="monotone"
-                      dataKey="nitrogen_raw"
-                      stroke="#DC2626"
-                      fill="none"
-                      strokeWidth={1}
-                      strokeDasharray="3 3"
-                      name="Raw Reading"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Forecast Data Chart */}
-              <div className="bg-[#F9FAFB] rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.08)] flex flex-col">
-                <div className="h-[60px] flex flex-col mb-4">
-                  <h4 className="text-[18px] text-[#111827] mb-2">Forecast Data (Next 7 Days)</h4>
-                  <ForecastFilter selected={forecastRange} onChange={setForecastRange} />
-                </div>
-                <ResponsiveContainer width="100%" height={320}>
-                  <BarChart data={forecastData} key={forecastRange}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis
-                      dataKey="date"
-                      stroke="#6B7280"
-                      fontSize={12}
-                      tickFormatter={formatXAxis}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      stroke="#6B7280"
-                      fontSize={12}
-                      label={{ value: 'mg/kg', angle: -90, position: 'insideLeft', style: { fontSize: 14, fill: '#6B7280' } }}
-                    />
-                    <Tooltip
-                      contentStyle={{ borderRadius: '12px', border: '1px solid #E5E7EB', fontSize: 14 }}
-                      labelFormatter={formatXAxis}
-                      labelStyle={{ color: '#111827' }}
-                    />
-                    <Bar
-                      dataKey="nitrogen"
-                      fill="#86EFAC"
-                      radius={[8, 8, 0, 0]}
-                      name="Nitrogen (mg/kg)"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-                <div className="flex items-center gap-2 mt-3 text-[14px] text-[#6B7280]">
-                  <div className="w-4 h-3 bg-[#86EFAC] rounded-t"></div>
-                  <span>▬ ▬ Forecast (lighter tone)</span>
-                </div>
-              </div>
-            </div>
-          </TabsContent>
 
           <TabsContent value="temp" className="mt-0">
             <h3 className="text-[20px] text-[#111827] mb-6">Temperature Analysis</h3>
@@ -781,27 +723,24 @@ export function AnalyticsPage() {
         <div className="space-y-3">
           {weatherSuggestions.length > 0 ? (
             weatherSuggestions.map((sugg, idx) => {
-              let icon = '🌧️';
+              let icon = '';
               if (sugg.type === 'DELAY') icon = '⏳';
               else if (sugg.type === 'TIME_SHIFT') icon = '🕘';
               else if (sugg.type === 'TRIGGER') icon = '🚨';
               else if (sugg.type === 'PRIORITY') icon = '🔥';
 
+              // Clean up task name - remove ID portion if present
+              const cleanTaskName = sugg.task_name.replace(/\s*\(ID:.*?\)\s*$/i, '').trim();
+
               return (
               <div key={idx} className="bg-white/10 rounded-xl p-4 shadow-sm border border-white/10 backdrop-blur-sm">
                 <div className="flex items-center gap-2 mb-1">
                   <p className="text-[16px] font-medium opacity-95">
-                    {icon} {sugg.task_name} {sugg.task_id && !String(sugg.task_id).includes('trigger') && `(ID: ${sugg.task_id})`}
+                    {icon} {cleanTaskName}
                   </p>
                 </div>
                 <p className="text-[14px] opacity-90 leading-relaxed font-light">
-                   {(sugg.type === 'TRIGGER' || sugg.type === 'PRIORITY') ? (
-                     <span>Action Required: <b>{sugg.task_name}</b></span>
-                   ) : (
-                     <span>Suggest reschedule from <b>{sugg.original_date}</b> to <b>{sugg.suggested_date}</b>.</span>
-                   )}
-                  <br/>
-                  Reason: {sugg.reason}
+                  {sugg.reason}
                 </p>
               </div>
               );
