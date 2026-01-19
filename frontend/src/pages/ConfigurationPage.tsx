@@ -1,16 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { defaultThresholds } from '../lib/mockData';
+import { getThresholds, updateThresholds, resetThresholds } from '../lib/api';
 import { toast } from 'sonner';
 import { Save, RotateCcw, Settings, Bell, Database } from 'lucide-react';
 
 export function ConfigurationPage() {
-  const [thresholds, setThresholds] = useState(defaultThresholds);
+  const [thresholds, setThresholds] = useState({
+    temperature: { min: 0, max: 60 },
+    moisture: { min: 1, max: 100 }
+  });
+  const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState({
     email: true,
     sms: false,
@@ -18,13 +22,51 @@ export function ConfigurationPage() {
     criticalOnly: false
   });
 
-  const handleSaveThresholds = () => {
-    toast.success('Configuration saved successfully');
+  // Fetch thresholds on component mount
+  useEffect(() => {
+    fetchThresholds();
+  }, []);
+
+  const fetchThresholds = async () => {
+    try {
+      setLoading(true);
+      const data = await getThresholds();
+      setThresholds({
+        temperature: { min: data.temperature_min, max: data.temperature_max },
+        moisture: { min: data.soil_moisture_min, max: data.soil_moisture_max }
+      });
+    } catch (error) {
+      toast.error('Failed to load thresholds');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleResetThresholds = () => {
-    setThresholds(defaultThresholds);
-    toast.info('Thresholds reset to default values');
+  const handleSaveThresholds = async () => {
+    try {
+      await updateThresholds({
+        temperature_min: thresholds.temperature.min,
+        temperature_max: thresholds.temperature.max,
+        soil_moisture_min: thresholds.moisture.min,
+        soil_moisture_max: thresholds.moisture.max
+      });
+      toast.success('Configuration saved successfully');
+    } catch (error) {
+      toast.error('Failed to save configuration');
+      console.error(error);
+    }
+  };
+
+  const handleResetThresholds = async () => {
+    try {
+      await resetThresholds();
+      await fetchThresholds(); // Refresh data
+      toast.info('Thresholds reset to default values');
+    } catch (error) {
+      toast.error('Failed to reset thresholds');
+      console.error(error);
+    }
   };
 
   const handleSaveNotifications = () => {
@@ -127,98 +169,6 @@ export function ConfigurationPage() {
                         setThresholds({
                           ...thresholds,
                           moisture: { ...thresholds.moisture, max: Number(e.target.value) }
-                        })
-                      }
-                      className="rounded-xl"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* pH */}
-              <div className="p-5 bg-[#F9FAFB] rounded-xl">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-8 h-8 bg-[#2563EB] rounded-lg flex items-center justify-center text-white">
-                    🧪
-                  </div>
-                  <div>
-                    <h4 className="text-[#111827]">Soil pH</h4>
-                    <p className="text-xs text-[#6B7280]">Acidity/alkalinity balance</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="phMin">Minimum</Label>
-                    <Input
-                      id="phMin"
-                      type="number"
-                      step="0.1"
-                      value={thresholds.ph.min}
-                      onChange={(e) =>
-                        setThresholds({
-                          ...thresholds,
-                          ph: { ...thresholds.ph, min: Number(e.target.value) }
-                        })
-                      }
-                      className="rounded-xl"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="phMax">Maximum</Label>
-                    <Input
-                      id="phMax"
-                      type="number"
-                      step="0.1"
-                      value={thresholds.ph.max}
-                      onChange={(e) =>
-                        setThresholds({
-                          ...thresholds,
-                          ph: { ...thresholds.ph, max: Number(e.target.value) }
-                        })
-                      }
-                      className="rounded-xl"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Nitrogen */}
-              <div className="p-5 bg-[#F9FAFB] rounded-xl">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-8 h-8 bg-[#CA8A04] rounded-lg flex items-center justify-center text-white">
-                    🍃
-                  </div>
-                  <div>
-                    <h4 className="text-[#111827]">Nitrogen Content</h4>
-                    <p className="text-xs text-[#6B7280]">Essential nutrient for growth</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="nitrogenMin">Minimum (mg/kg)</Label>
-                    <Input
-                      id="nitrogenMin"
-                      type="number"
-                      value={thresholds.nitrogen.min}
-                      onChange={(e) =>
-                        setThresholds({
-                          ...thresholds,
-                          nitrogen: { ...thresholds.nitrogen, min: Number(e.target.value) }
-                        })
-                      }
-                      className="rounded-xl"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nitrogenMax">Maximum (mg/kg)</Label>
-                    <Input
-                      id="nitrogenMax"
-                      type="number"
-                      value={thresholds.nitrogen.max}
-                      onChange={(e) =>
-                        setThresholds({
-                          ...thresholds,
-                          nitrogen: { ...thresholds.nitrogen, max: Number(e.target.value) }
                         })
                       }
                       className="rounded-xl"
