@@ -3,11 +3,10 @@ import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Switch } from '../components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { getThresholds, updateThresholds, resetThresholds } from '../lib/api';
 import { toast } from 'sonner';
-import { Save, RotateCcw, Settings, Bell, Database } from 'lucide-react';
+import { Save, RotateCcw, Settings, Database } from 'lucide-react';
 
 export function ConfigurationPage() {
   const [thresholds, setThresholds] = useState({
@@ -15,12 +14,6 @@ export function ConfigurationPage() {
     moisture: { min: 1, max: 100 }
   });
   const [loading, setLoading] = useState(true);
-  const [notifications, setNotifications] = useState({
-    email: true,
-    sms: false,
-    push: true,
-    criticalOnly: false
-  });
 
   // Fetch thresholds on component mount
   useEffect(() => {
@@ -69,33 +62,21 @@ export function ConfigurationPage() {
     }
   };
 
-  const handleSaveNotifications = () => {
-    toast.success('Notification settings saved');
-  };
-
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-[20px] text-[#111827]">System Configuration</h2>
-        <p className="text-[16px] text-[#374151]">Manage thresholds, notifications, and system preferences</p>
+        <p className="text-[16px] text-[#374151]">Manage thresholds and system preferences</p>
       </div>
 
       <Tabs defaultValue="thresholds" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 rounded-xl bg-transparent">
+        <TabsList className="grid w-full grid-cols-2 rounded-xl bg-transparent">
           <TabsTrigger
             value="thresholds"
             className="rounded-lg gap-2 data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8] transition"
           >
             <Settings size={16} />
             Thresholds
-          </TabsTrigger>
-
-          <TabsTrigger
-            value="notifications"
-            className="rounded-lg gap-2 data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8] transition"
-          >
-            <Bell size={16} />
-            Notifications
           </TabsTrigger>
 
           <TabsTrigger
@@ -232,84 +213,6 @@ export function ConfigurationPage() {
                 Save Thresholds
               </Button>
             </div>
-          </Card>
-        </TabsContent>
-
-        {/* Notifications Tab */}
-        <TabsContent value="notifications" className="mt-6 space-y-6">
-          <Card className="p-6 rounded-2xl bg-white">
-            <div className="mb-6">
-              <h3 className="text-[#111827] mb-1">Notification Preferences</h3>
-              <p className="text-sm text-[#6B7280]">
-                Choose how you want to receive alerts and updates
-              </p>
-            </div>
-
-            <div className="space-y-6">
-              <div className="flex items-center justify-between p-4 bg-[#F9FAFB] rounded-xl">
-                <div className="flex-1">
-                  <h4 className="text-[#111827] mb-1">Email Notifications</h4>
-                  <p className="text-sm text-[#6B7280]">Receive alerts via email</p>
-                </div>
-                <Switch
-                  checked={notifications.email}
-                  onCheckedChange={(checked: boolean) =>
-                    setNotifications({ ...notifications, email: checked })
-                  }
-                  aria-label="Toggle email notifications"
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-[#F9FAFB] rounded-xl">
-                <div className="flex-1">
-                  <h4 className="text-[#111827] mb-1">SMS Notifications</h4>
-                  <p className="text-sm text-[#6B7280]">Receive alerts via text message</p>
-                </div>
-                <Switch
-                  checked={notifications.sms}
-                  onCheckedChange={(checked: boolean) =>
-                    setNotifications({ ...notifications, sms: checked })
-                  }
-                  aria-label="Toggle SMS notifications"
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-[#F9FAFB] rounded-xl">
-                <div className="flex-1">
-                  <h4 className="text-[#111827] mb-1">Push Notifications</h4>
-                  <p className="text-sm text-[#6B7280]">Receive in-app notifications</p>
-                </div>
-                <Switch
-                  checked={notifications.push}
-                  onCheckedChange={(checked: boolean) =>
-                    setNotifications({ ...notifications, push: checked })
-                  }
-                  aria-label="Toggle push notifications"
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-[#F9FAFB] rounded-xl">
-                <div className="flex-1">
-                  <h4 className="text-[#111827] mb-1">Critical Alerts Only</h4>
-                  <p className="text-sm text-[#6B7280]">Only receive critical threshold violations</p>
-                </div>
-                <Switch
-                  checked={notifications.criticalOnly}
-                  onCheckedChange={(checked: boolean) =>
-                    setNotifications({ ...notifications, criticalOnly: checked })
-                  }
-                  aria-label="Toggle critical alerts only"
-                />
-              </div>
-            </div>
-
-            <Button
-              className="w-full mt-6 bg-[#15803D] hover:bg-[#16A34A] rounded-xl gap-2"
-              onClick={handleSaveNotifications}
-            >
-              <Save size={16} />
-              Save Notification Settings
-            </Button>
           </Card>
         </TabsContent>
 
