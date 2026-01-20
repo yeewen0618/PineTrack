@@ -1,17 +1,33 @@
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from uuid import uuid4
 import hashlib
 import logging
+from typing import Any, Dict, List, Optional
 
+from pydantic import BaseModel
 from postgrest.exceptions import APIError
 
+from app.ai_inference import predict_ai_status
 from app.core.security import get_current_user
 from app.core.supabase_client import supabase
+from app.reschedule_engine import (
+    build_daily_rain_calendar,
+    get_insights_with_real_dates,
+    is_iso_date,
+    normalize_weather_df,
+)
+from app.weather_service import fetch_weather_data
 from app.schemas.schedule import GenerateScheduleRequest, EvaluateThresholdStatusRequest
 
 router = APIRouter(prefix="/api/schedule", tags=["Schedule"])
 logger = logging.getLogger(__name__)
+
+
+class InsightsRequest(BaseModel):
+    plot_id: str
+    date: str
+    weather_forecast: Optional[List[Dict[str, Any]]] = None
 
 
 def _dates_for_template(start_date: date, tpl: dict, horizon_days: int = 120):
@@ -77,6 +93,136 @@ def _stable_start_index(plot_id: str, worker_count: int) -> int:
         return 0
     digest = hashlib.sha256(plot_id.encode("utf-8")).hexdigest()
     return int(digest, 16) % worker_count
+
+
+def _load_sensor_summary(device_id: int) -> Dict[str, float]:
+    defaults = {"avg_n": 0.0, "avg_moisture": 0.0, "avg_temp": 0.0}
+
+    cleaned_res = (
+        supabase.table("cleaned_data")
+        .select(
+            "device_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+            "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
+        )
+        .eq("device_id", device_id)
+        .order("data_added", desc=True)
+        .limit(1)
+        .execute()
+    )
+    cleaned_row = (cleaned_res.data or [None])[0]
+
+    if cleaned_row and cleaned_row.get("data_added") is None:
+        fallback_res = (
+            supabase.table("cleaned_data")
+            .select(
+                "device_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+                "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
+            )
+            .eq("device_id", device_id)
+            .order("processed_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        cleaned_row = (fallback_res.data or [None])[0] or cleaned_row
+
+    if not cleaned_row:
+        return defaults
+
+    temp = cleaned_row.get("cleaned_temperature")
+    moisture = cleaned_row.get("cleaned_soil_moisture")
+    nitrogen = cleaned_row.get("cleaned_nitrogen")
+
+    if temp is None:
+        temp = cleaned_row.get("temperature")
+    if moisture is None:
+        moisture = cleaned_row.get("soil_moisture")
+    if nitrogen is None:
+        nitrogen = cleaned_row.get("nitrogen")
+
+    return {
+        "avg_n": float(nitrogen or 0.0),
+        "avg_moisture": float(moisture or 0.0),
+        "avg_temp": float(temp or 0.0),
+    }
+
+
+def _parse_date_value(value: str) -> date:
+    if not value:
+        raise HTTPException(status_code=400, detail="Missing date value")
+    try:
+        return datetime.strptime(value[:10], "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid date format, expected YYYY-MM-DD") from exc
+
+
+def _get_rain_metrics(calendar: Dict[str, float], base_date: date) -> tuple[float, float]:
+    base_str = base_date.isoformat()
+    rain_today = float(calendar.get(base_str, 0.0) or 0.0)
+    rain_next_3d = 0.0
+    for offset in range(1, 4):
+        next_date = base_date + timedelta(days=offset)
+        rain_next_3d += float(calendar.get(next_date.isoformat(), 0.0) or 0.0)
+    return rain_today, rain_next_3d
+
+
+def _looks_like_date(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    return is_iso_date(value)
+
+
+def _merge_reason(existing: Optional[str], addition: Optional[str]) -> Optional[str]:
+    existing = (existing or "").strip()
+    addition = (addition or "").strip()
+    if existing and addition:
+        return f"{existing} | {addition}"
+    if existing:
+        return existing
+    if addition:
+        return addition
+    return None
+
+
+def _apply_insight_reschedules(tasks: List[Dict[str, Any]], suggestions: List[Dict[str, Any]]) -> int:
+    task_by_id = {t.get("id"): t for t in tasks if t.get("id")}
+    updated = 0
+
+    for rec in suggestions or []:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("type") != "RESCHEDULE":
+            continue
+
+        task_id = rec.get("task_id")
+        if not task_id or str(task_id).startswith("trigger_"):
+            continue
+
+        task = task_by_id.get(task_id)
+        if not task:
+            continue
+
+        suggested_date = rec.get("suggested_date")
+        if not _looks_like_date(suggested_date):
+            continue
+
+        status = (task.get("status") or "").strip()
+        if status not in ("Pending", "Stop"):
+            continue
+
+        if task.get("proposed_date") == suggested_date:
+            continue
+
+        update_payload: Dict[str, Any] = {
+            "proposed_date": suggested_date,
+            "reason": _merge_reason(task.get("reason"), rec.get("reason")),
+        }
+        if not task.get("original_date"):
+            update_payload["original_date"] = task.get("task_date")
+
+        supabase.table("tasks").update(update_payload).eq("id", task_id).execute()
+        updated += 1
+
+    return updated
 
 
 def generate_schedule_for_plot(
@@ -314,8 +460,20 @@ def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depe
 
     updates = []
 
+    weather_forecast = []
+    try:
+        weather_forecast = fetch_weather_data(past_days=0, forecast_days=4)
+    except Exception:
+        logger.exception("Weather fetch failed for AI status gating")
+        weather_forecast = []
+
+    weather_calendar = build_daily_rain_calendar(normalize_weather_df(weather_forecast))
+    rain_today, rain_next_3d = _get_rain_metrics(weather_calendar, target_date)
+
     # 2) Example threshold-based rules (expand later)
     soil_moisture = readings.get("soil_moisture")
+    temperature = readings.get("temperature")
+    nitrogen = readings.get("nitrogen")
     moisture_max = thresholds.get("soil_moisture_max")
 
     for t in tasks:
@@ -337,6 +495,28 @@ def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depe
                 new_status = "Pending"
                 new_reason = f"Field too wet ({soil_moisture} > {moisture_field_max}); postpone task."
                 new_proposed_date = (target_date + timedelta(days=reschedule_days)).isoformat()
+
+        features = {
+            "soil_moisture": float(soil_moisture or 0.0),
+            "temperature": float(temperature or 0.0),
+            "nitrogen": float(nitrogen or 0.0),
+            "rain_today": rain_today,
+            "rain_next_3d": rain_next_3d,
+            "task_type": str(t.get("type") or "").lower(),
+        }
+        ai_label, ai_conf = predict_ai_status(features)
+
+        if new_status == "Proceed":
+            if ai_label == "Pending":
+                new_status = "Pending"
+                new_reason = _merge_reason(new_reason, f"AI predicted Pending (conf {ai_conf:.2f})")
+            elif ai_label == "Stop" and ai_conf >= 0.70:
+                new_status = "Stop"
+                new_reason = _merge_reason(new_reason, f"AI predicted Stop (conf {ai_conf:.2f})")
+        elif new_status == "Pending":
+            if ai_label == "Stop" and ai_conf >= 0.70:
+                new_status = "Stop"
+                new_reason = _merge_reason(new_reason, f"AI predicted Stop (conf {ai_conf:.2f})")
 
         # Save update if changed
         updates.append((t["id"], new_status, new_reason, new_proposed_date))
@@ -360,3 +540,38 @@ def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depe
         "reading_device_id": reading_meta.get("device_id") if reading_meta else None,
         "reading_timestamp": reading_meta.get("timestamp") if reading_meta else None,
     }
+
+
+# Usage: frontend posts /api/schedule/insights with plot_id/date to populate Insight Recommendation card.
+# suggestions.py remains unchanged; reschedule_engine adds AI delay + weather-validated dates.
+@router.post("/insights")
+def get_insights(payload: InsightsRequest, user=Depends(get_current_user)):
+    plot_id = payload.plot_id
+    target_date = _parse_date_value(payload.date)
+
+    tasks_res = (
+        supabase.table("tasks")
+        .select("id, title, type, task_date, status, reason, original_date, proposed_date")
+        .eq("plot_id", plot_id)
+        .eq("task_date", target_date.isoformat())
+        .execute()
+    )
+    tasks = tasks_res.data or []
+    if not tasks:
+        return {"suggestions": []}
+
+    device_id = 205
+    sensor_summary = _load_sensor_summary(device_id)
+
+    weather_forecast = payload.weather_forecast
+    if weather_forecast is None:
+        try:
+            weather_forecast = fetch_weather_data(past_days=0, forecast_days=14)
+        except Exception:
+            logger.exception("Weather fetch failed for insights")
+            weather_forecast = []
+
+    suggestions = get_insights_with_real_dates(tasks, weather_forecast or [], sensor_summary)
+    _apply_insight_reschedules(tasks, suggestions)
+
+    return {"suggestions": suggestions}

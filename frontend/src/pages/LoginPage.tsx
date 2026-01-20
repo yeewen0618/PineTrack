@@ -38,6 +38,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       const data = await login(username, password);
       console.log("Login success:", data);
       
+      if (!data?.access_token) {
+        setError("Login failed. Missing access token.");
+        return;
+      }
+
       sessionStorage.setItem("access_token", data.access_token);
       // optional: wipe any old persistent token
       localStorage.removeItem("access_token");
@@ -61,6 +66,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           // ignore JSON parse errors
         }
 
+          
         const message = parsedDetail || rawMessage;
         const normalized = message.toLowerCase();
 
@@ -88,6 +94,8 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       setLoading(false);
     }
   };
+
+  
 
   return (
     // Full-screen container, centered horizontally and vertically

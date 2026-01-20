@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.security import OAuth2PasswordRequestForm
 from app.schemas.auth import ChangePasswordRequest, LoginRequest, TokenResponse, UserPublic
 from app.core.security import create_access_token, get_current_user
 from app.core.password import hash_password, verify_password
@@ -6,6 +7,7 @@ from app.core.supabase_client import supabase
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
 
 def _public_user(user: dict) -> UserPublic:
     return UserPublic(
@@ -17,61 +19,76 @@ def _public_user(user: dict) -> UserPublic:
         created_at=user.get("created_at"),
     )
 
-# --- 1. LOGIN API ---
-@router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest):
-    # 1. Fetch user from Supabase 'users' table
+
+def _fetch_user_by_username(username: str) -> dict:
     res = (
         supabase.table("users")
         .select("id, username, password_hash, email, full_name, role, created_at")
-        .eq("username", payload.username)
+        .eq("username", username)
         .limit(1)
         .execute()
     )
-    
-    # 2. Check if user exists
     if not res.data:
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    
-    user = res.data[0]
+    return res.data[0]
 
-    # 3. Verify password
-    if not verify_password(payload.password, user["password_hash"]):
+
+def _authenticate(username: str, password: str) -> dict:
+    user = _fetch_user_by_username(username)
+    if not verify_password(password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid username or password")
+    return user
 
-    # 4. Generate Token
+
+def _issue_token(user: dict) -> TokenResponse:
     token = create_access_token(
         {"sub": user["username"], "user_id": user["id"], "role": user.get("role", "worker")}
     )
-    return {"access_token": token, "token_type": "bearer", "user": _public_user(user)}
+    return TokenResponse(access_token=token, token_type="bearer", user=_public_user(user))
+
+
+# --- 1) LOGIN (JSON) - keep for frontend/backward compatibility ---
+@router.post("/login", response_model=TokenResponse)
+def login(payload: LoginRequest):
+    user = _authenticate(payload.username, payload.password)
+    return _issue_token(user)
+
+
+# --- 1B) TOKEN (OAuth2 Form) - for Swagger Authorize ---
+@router.post("/token", response_model=TokenResponse)
+def token(form_data: OAuth2PasswordRequestForm = Depends()):
+    """
+    OAuth2 Password Flow endpoint for Swagger UI "Authorize".
+    Expects application/x-www-form-urlencoded with fields: username, password.
+    """
+    user = _authenticate(form_data.username, form_data.password)
+    return _issue_token(user)
 
 
 # --- 2. REGISTER API ---
 class RegisterRequest(BaseModel):
     username: str
     password: str
-    email: str = None
-    full_name: str = None
+    email: str | None = None
+    full_name: str | None = None
     role: str = "worker"
+
 
 @router.post("/register")
 def register(payload: RegisterRequest):
-    # Check if user exists
     existing = supabase.table("users").select("*").eq("username", payload.username).execute()
     if existing.data:
-         raise HTTPException(status_code=400, detail="Username already registered")
+        raise HTTPException(status_code=400, detail="Username already registered")
 
-    # Insert user (Hashed Password)
     user_data = {
         "username": payload.username,
         "password_hash": hash_password(payload.password),
         "email": payload.email,
         "full_name": payload.full_name,
-        "role": payload.role
+        "role": payload.role,
     }
-    
+
     res = supabase.table("users").insert(user_data).execute()
-    
     if not res.data:
         raise HTTPException(status_code=500, detail="Failed to register user")
 

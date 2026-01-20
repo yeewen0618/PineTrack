@@ -6,7 +6,7 @@ from jose import JWTError, jwt
 from app.core.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # OAuth2 scheme (FastAPI reads Authorization: Bearer <token>)
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):

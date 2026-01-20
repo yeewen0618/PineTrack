@@ -23,24 +23,31 @@ const API_BASE =
   import.meta.env.VITE_API_BASE ??
   "http://127.0.0.1:5001";
 
+type ApiFetchOptions = RequestInit & {
+  skipAuthRedirect?: boolean;
+};
+
 export async function apiFetch<T>(
   path: string,
-  options: RequestInit = {},
+  options: ApiFetchOptions = {},
 ): Promise<T> {
+  const { skipAuthRedirect, ...fetchOptions } = options;
   const token = sessionStorage.getItem("access_token");
 
   const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
+    ...fetchOptions,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers ?? {}),
+      ...(fetchOptions.headers ?? {}),
     },
   });
 
   if (res.status === 401) {
     sessionStorage.removeItem("access_token");
-    window.location.href = "/login";
+    if (!skipAuthRedirect && window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
   }
 
 
@@ -59,6 +66,7 @@ export async function login(username: string, password: string) {
   return apiFetch<{ access_token: string; token_type: string; user?: User }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
+    skipAuthRedirect: true,
   });
 }
 
@@ -134,8 +142,8 @@ export type User = {
   created_at?: string | null;
 };
 
-function normalizeWorker(worker: any): Worker {
-  const rawId = worker?.id ?? worker?.worker_id;
+function normalizeWorker(worker: Worker): Worker {
+  const rawId = worker?.id;
   return {
     ...worker,
     id: rawId == null ? "" : String(rawId),
@@ -248,7 +256,7 @@ export async function updateTaskAssignment(payload: {
 
 // ---------- Workers ----------
 export async function listWorkers() {
-  const res = await apiFetch<{ ok: true; data: any[] }>("/api/workers");
+  const res = await apiFetch<{ ok: true; data: Worker[] }>("/api/workers");
   const normalized = (res.data ?? []).map((worker) => normalizeWorker(worker));
 
   return { ...res, data: normalized };
@@ -258,7 +266,7 @@ export async function updateWorker(
   workerId: string,
   payload: { name?: string; role?: string | null; contact?: string | null; is_active?: boolean | null },
 ) {
-  const res = await apiFetch<{ ok: true; data: any }>(
+  const res = await apiFetch<{ ok: true; data: Worker }>(
     `/api/workers/${encodeURIComponent(workerId)}`,
     {
       method: "PUT",

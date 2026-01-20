@@ -14,7 +14,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers.authentication import router as auth_router
 from app.routers.analytics import router as analytics_router
 from app.core.supabase_client import supabase
-from app.routers.test import router as test_router
 from app.routers.workers import router as workers_router
 from app.routers import schedule
 from app.routers import plots
@@ -28,6 +27,7 @@ app = FastAPI(title="PineTrack Backend")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,7 +50,6 @@ def db_test():
         "sample": res.data
     }
 
-app.include_router(test_router)
 app.include_router(workers_router)
 app.include_router(schedule.router)
 app.include_router(plots.router)

@@ -1,5 +1,8 @@
 import re
 from passlib.context import CryptContext
+from passlib.exc import UnknownHashError
+from passlib.handlers.bcrypt import bcrypt as bcrypt_handler
+bcrypt_handler.set_backend("bcrypt")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -11,7 +14,10 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
-    return pwd_context.verify(plain_password, password_hash)
+    try:
+        return pwd_context.verify(plain_password, password_hash)
+    except (TypeError, ValueError, UnknownHashError):
+        return False
 
 
 def is_bcrypt_hash(value: str) -> bool:
