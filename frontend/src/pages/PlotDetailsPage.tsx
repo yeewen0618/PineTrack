@@ -6,7 +6,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import {
   mockObservations
 } from '../lib/mockData';
-import { ArrowLeft, Calendar as CalendarIcon } from 'lucide-react';
+import { ArrowLeft, Calendar as CalendarIcon, Check, Clock, XCircle } from 'lucide-react';
 import { Textarea } from '../components/ui/textarea';
 import { toast } from 'sonner';
 import {
@@ -30,6 +30,23 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
 
   // Current date set to November 13, 2025
   const TODAY = new Date();
+
+  const parseDateString = (dateStr: string) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+
+  const startOfToday = new Date(TODAY);
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const isPastDate = (dateStr: string) => parseDateString(dateStr) < startOfToday;
+
+  const formatTaskDate = (dateStr: string) =>
+    parseDateString(dateStr).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
 
   // DB-backed
   const [plot, setPlot] = useState<Plot | null>(null);
@@ -122,10 +139,21 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
     return day === TODAY.getDate();
   };
 
-  const getTaskColor = (status: string) => {
-    if (status === 'Proceed') return 'bg-[#86EFAC] text-[#111827]';
-    if (status === 'Pending') return 'bg-[#FDE68A] text-[#111827]';
-    return 'bg-[#FCA5A5] text-[#111827]';
+  const getTaskColor = (status: string, isPastTask: boolean) => {
+    if (isPastTask) return 'bg-gray-100 text-gray-500 border border-gray-200 opacity-80';
+    if (status === 'Proceed') return 'bg-green-100 text-green-800 border border-green-200';
+    if (status === 'Pending') return 'bg-amber-100 text-amber-800 border border-amber-200';
+    return 'bg-red-100 text-red-800 border border-red-200';
+  };
+
+  const getDayCellBackground = (dayTasks: { date: string; status: string }[], isTodayCell: boolean) => {
+    const activeTasks = dayTasks.filter((task) => !isPastDate(task.date));
+    const hasStop = activeTasks.some((task) => task.status === 'Stop');
+    const hasPending = activeTasks.some((task) => task.status === 'Pending');
+
+    if (hasStop) return 'bg-red-50';
+    if (hasPending) return 'bg-amber-50';
+    return isTodayCell ? 'bg-slate-50' : 'bg-white';
   };
 
   return (
@@ -209,38 +237,66 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
 
                 const tasks = getTasksForDate(day);
                 const isTodayCell = isToday(day);
+                const dayBackground = getDayCellBackground(tasks, isTodayCell);
 
                 return (
                   <button
                     key={day}
-                    className={`min-h-[100px] p-2 rounded-lg border transition-all ${isTodayCell
-                      ? 'border-[#15803D] bg-[#DCFCE7] border-2'
-                      : 'border-[#E5E7EB] hover:border-[#15803D] hover:bg-[#F9FAFB]'
-                      }`}
+                    className={`min-h-[100px] p-2 rounded-lg border border-gray-200 transition-shadow ${dayBackground} ${isTodayCell ? 'ring-2 ring-blue-300' : ''}`}
                     aria-label={`Day ${day}, ${tasks.length} tasks`}
                   >
-                    <div className="text-[14px] text-[#111827] mb-1">{day}</div>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-[14px] text-[#111827]">{day}</div>
+                      {isTodayCell && (
+                        <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
+                          Today
+                        </span>
+                      )}
+                    </div>
                     <div className="space-y-0.5">
-                      {tasks.slice(0, 2).map((task) => (
-                        <TooltipProvider key={task.id}>
-                          <UITooltip>
-                            <TooltipTrigger asChild>
-                              <div
-                                className={`text-[11px] p-1 rounded truncate cursor-pointer transition-shadow hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] ${getTaskColor(task.status)}`}
-                                style={{ fontWeight: 500 }}
-                              >
-                                {task.title}
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <div className="space-y-1">
-                                <p className="text-[14px]">{task.title}</p>
-                                <p className="text-[12px] text-[#6B7280]">Worker: {task.assigned_worker_name ?? 'Unassigned'}</p>
-                              </div>
-                            </TooltipContent>
-                          </UITooltip>
-                        </TooltipProvider>
-                      ))}
+                      {tasks.slice(0, 2).map((task) => {
+                        const isPastTask = isPastDate(task.date);
+                        const StatusIcon = isPastTask
+                          ? Check
+                          : task.status === 'Pending'
+                            ? Clock
+                            : task.status === 'Stop'
+                              ? XCircle
+                              : null;
+
+                        return (
+                          <TooltipProvider key={task.id}>
+                            <UITooltip>
+                              <TooltipTrigger asChild>
+                                <div
+                                  className={`text-[11px] p-1 rounded ${getTaskColor(task.status, isPastTask)} ${isPastTask
+                                    ? 'cursor-default'
+                                    : 'cursor-pointer transition-shadow hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
+                                    }`}
+                                  style={{ fontWeight: 500 }}
+                                  aria-disabled={isPastTask}
+                                >
+                                  <div className="flex items-center gap-1 min-w-0">
+                                    {StatusIcon && <StatusIcon size={10} className="text-current" aria-hidden="true" />}
+                                    <span className="truncate">
+                                      {isPastTask ? `Done: ${task.title}` : task.title}
+                                    </span>
+                                  </div>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <div className="space-y-1">
+                                  <p className="text-[14px]">{task.title}</p>
+                                  <p className="text-[12px] text-[#6B7280]">Worker: {task.assigned_worker_name ?? 'Unassigned'}</p>
+                                  {isPastTask && (
+                                    <p className="text-[12px] text-gray-500">Task completed on {formatTaskDate(task.date)}</p>
+                                  )}
+                                </div>
+                              </TooltipContent>
+                            </UITooltip>
+                          </TooltipProvider>
+                        );
+                      })}
                       {tasks.length > 2 && (
                         <div className="text-[10px] text-[#6B7280] text-center">+{tasks.length - 2}</div>
                       )}

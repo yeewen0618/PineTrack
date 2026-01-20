@@ -2,8 +2,7 @@
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { StatusBadge } from '../components/StatusBadge';
-import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, Clock, XCircle } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -64,6 +63,69 @@ export function SchedulePage() {
   const parseDateString = (dateStr: string) => {
     const [y, m, d] = dateStr.split('-').map(Number);
     return new Date(y, m - 1, d);
+  };
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const isPastDate = (dateStr: string) => parseDateString(dateStr) < startOfToday;
+
+  const formatTaskDate = (dateStr: string) =>
+    parseDateString(dateStr).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+  const getTaskContainerClasses = (task: ScheduleTaskVM) => {
+    if (isPastDate(task.date)) return 'bg-gray-100 border border-gray-200 opacity-80';
+    if (task.status === 'Proceed') return 'bg-green-100 border border-green-200';
+    if (task.status === 'Pending') return 'bg-amber-100 border border-amber-200';
+    return 'bg-red-100 border border-red-200';
+  };
+
+  const getTaskTextColor = (task: ScheduleTaskVM, tone: 'primary' | 'secondary' = 'primary') => {
+    if (isPastDate(task.date)) return 'text-gray-500';
+    if (task.status === 'Proceed') return tone === 'primary' ? 'text-green-800' : 'text-green-700';
+    if (task.status === 'Pending') return tone === 'primary' ? 'text-amber-800' : 'text-amber-700';
+    return tone === 'primary' ? 'text-red-800' : 'text-red-700';
+  };
+
+  const getTaskStatusLabel = (task: ScheduleTaskVM) => {
+    if (isPastDate(task.date)) return 'Done';
+    if (task.status === 'Stop') return 'Stopped';
+    return task.status;
+  };
+
+  const getTaskStatusIcon = (task: ScheduleTaskVM) => {
+    if (isPastDate(task.date)) return Check;
+    if (task.status === 'Pending') return Clock;
+    if (task.status === 'Stop') return XCircle;
+    return null;
+  };
+
+  const getDayCellBackground = (dayTasks: ScheduleTaskVM[], isTodayCell: boolean) => {
+    const activeTasks = dayTasks.filter((task) => !isPastDate(task.date));
+    const hasStop = activeTasks.some((task) => task.status === 'Stop');
+    const hasPending = activeTasks.some((task) => task.status === 'Pending');
+
+    if (hasStop) return 'bg-red-50';
+    if (hasPending) return 'bg-amber-50';
+    return isTodayCell ? 'bg-slate-50' : 'bg-white';
+  };
+
+  const renderTaskStatusBadge = (task: ScheduleTaskVM) => {
+    const StatusIcon = getTaskStatusIcon(task);
+
+    return (
+      <div
+        className={`inline-flex items-center justify-center gap-1.5 rounded-[16px] h-[28px] px-3 ${getTaskContainerClasses(task)} ${getTaskTextColor(task)}`}
+        style={{ minWidth: '90px' }}
+      >
+        {StatusIcon && <StatusIcon size={14} className="text-current" aria-hidden="true" />}
+        <span className="text-[14px] font-medium">{getTaskStatusLabel(task)}</span>
+      </div>
+    );
   };
 
   const loadScheduleData = useCallback(async () => {
@@ -394,14 +456,13 @@ export function SchedulePage() {
                 const dayTasks = getTasksForDay(d);
                 const maxVisible = 1;
                 const isToday = isSameDay(new Date(year, month, d), today);
+                const dayBackground = getDayCellBackground(dayTasks, isToday);
+                const showTodayBadge = isToday && dayTasks.length <= maxVisible;
 
                 return (
                   <div
                     key={d}
-                    className={`h-[84px] border rounded-xl p-2 relative cursor-pointer ${isToday
-                      ? 'bg-[#F0FDF4] border-[#86EFAC] ring-1 ring-[#BBF7D0]'
-                      : 'bg-white border-[#E5E7EB]'
-                      }`}
+                    className={`h-[84px] border border-gray-200 rounded-xl p-2 relative cursor-pointer ${dayBackground} ${isToday ? 'ring-2 ring-blue-300' : ''}`}
                     onClick={() => setSelectedDate(dateStr)}
                     role="button"
                     tabIndex={0}
@@ -409,39 +470,55 @@ export function SchedulePage() {
                       if (e.key === 'Enter' || e.key === ' ') setSelectedDate(dateStr);
                     }}
                   >
-                    <div className="text-[14px] text-[#111827]">{d}</div>
+                    <div className="flex items-center justify-between">
+                      <div className="text-[14px] text-[#111827]">{d}</div>
+                      {showTodayBadge && (
+                        <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
+                          Today
+                        </span>
+                      )}
+                    </div>
 
                     <div className="mt-1 space-y-1">
-                      {dayTasks.slice(0, maxVisible).map((task) => (
-                        <TooltipProvider key={task.id}>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div
-                                className={`text-[12px] px-2 py-1 rounded-lg cursor-pointer ${task.status === 'Proceed'
-                                  ? 'bg-[#DCFCE7] text-[#166534]'
-                                  : task.status === 'Pending'
-                                    ? 'bg-[#FEF3C7] text-[#92400E]'
-                                    : 'bg-[#FEE2E2] text-[#991B1B]'
-                                  }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedTask(task);
-                                }}
-                              >
-                                <p className="truncate">{task.title}</p>
-                                <p className="text-[10px] text-[#6B7280] truncate">
-                                  {task.assignedWorker ?? 'Unassigned'}
-                                </p>
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent className="max-w-[220px]">
-                              <p className="font-medium">{task.title}</p>
-                              <p className="text-xs text-[#6B7280]">{task.plotName} â€¢ {task.date}</p>
-                              <p className="text-xs text-[#6B7280]">Worker: {task.assignedWorker ?? 'Unassigned'}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      ))}
+                      {dayTasks.slice(0, maxVisible).map((task) => {
+                        const isPastTask = isPastDate(task.date);
+                        const StatusIcon = getTaskStatusIcon(task);
+
+                        return (
+                          <TooltipProvider key={task.id}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div
+                                  className={`text-[12px] px-2 py-1 rounded-lg ${getTaskContainerClasses(task)} ${getTaskTextColor(task)} ${isPastTask ? 'cursor-default' : 'cursor-pointer'}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!isPastTask) setSelectedTask(task);
+                                  }}
+                                  aria-disabled={isPastTask}
+                                >
+                                  <p className="flex items-center gap-1 min-w-0">
+                                    {StatusIcon && <StatusIcon size={12} className="text-current" aria-hidden="true" />}
+                                    <span className="truncate">
+                                      {isPastTask ? `Done: ${task.title}` : task.title}
+                                    </span>
+                                  </p>
+                                  <p className={`text-[10px] truncate ${getTaskTextColor(task, 'secondary')}`}>
+                                    {task.assignedWorker ?? 'Unassigned'}
+                                  </p>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-[220px]">
+                                <p className="font-medium">{task.title}</p>
+                                <p className="text-xs text-[#6B7280]">{task.plotName} ??? {task.date}</p>
+                                <p className="text-xs text-[#6B7280]">Worker: {task.assignedWorker ?? 'Unassigned'}</p>
+                                {isPastTask && (
+                                  <p className="text-xs text-gray-500">Task completed on {formatTaskDate(task.date)}</p>
+                                )}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        );
+                      })}
 
                       {dayTasks.length > maxVisible && (
                         <Badge className="absolute top-2 right-2 bg-[#111827] text-white text-[11px] rounded-full px-2">
@@ -487,14 +564,13 @@ export function SchedulePage() {
                 return weekOrdered.map((dayData) => {
                   const dayTasks = dayData.tasks ?? [];
                   const isToday = isSameDay(parseDateString(dayData.date), today);
+                  const dayBackground = getDayCellBackground(dayTasks, isToday);
+                  const showTodayBadge = isToday && dayTasks.length <= maxVisible;
 
                   return (
                     <div
                       key={dayData.date}
-                      className={`h-[84px] border rounded-xl p-2 relative cursor-pointer ${isToday
-                        ? 'bg-[#F0FDF4] border-[#86EFAC] ring-1 ring-[#BBF7D0]'
-                        : 'bg-white border-[#E5E7EB]'
-                        }`}
+                      className={`h-[84px] border border-gray-200 rounded-xl p-2 relative cursor-pointer ${dayBackground} ${isToday ? 'ring-2 ring-blue-300' : ''}`}
                       onClick={() => setSelectedDate(dayData.date)}
                       role="button"
                       tabIndex={0}
@@ -503,42 +579,55 @@ export function SchedulePage() {
                       }}
                     >
                       {/* Day number (same style as month view) */}
-                      <div className="text-[14px] text-[#111827]">{dayData.dayNumber}</div>
+                      <div className="flex items-center justify-between">
+                        <div className="text-[14px] text-[#111827]">{dayData.dayNumber}</div>
+                        {showTodayBadge && (
+                          <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
+                            Today
+                          </span>
+                        )}
+                      </div>
 
                       <div className="mt-1 space-y-1">
-                        {dayTasks.slice(0, maxVisible).map((task) => (
-                          <TooltipProvider key={task.id}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div
-                                  className={`text-[12px] px-2 py-1 rounded-lg cursor-pointer ${task.status === 'Proceed'
-                                    ? 'bg-[#DCFCE7] text-[#166534]'
-                                    : task.status === 'Pending'
-                                      ? 'bg-[#FEF3C7] text-[#92400E]'
-                                      : 'bg-[#FEE2E2] text-[#991B1B]'
-                                    }`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedTask(task);
-                                  }}
-                                >
-                                  <p className="truncate">{task.title}</p>
-                                  <p className="text-[10px] text-[#6B7280] truncate">
-                                    {task.assignedWorker ?? 'Unassigned'}
-                                  </p>
-                                </div>
-                              </TooltipTrigger>
+                        {dayTasks.slice(0, maxVisible).map((task) => {
+                          const isPastTask = isPastDate(task.date);
+                          const StatusIcon = getTaskStatusIcon(task);
 
-                              <TooltipContent className="max-w-[220px]">
-                                <p className="font-medium">{task.title}</p>
-                                <p className="text-xs text-[#6B7280]">
-                                  {task.plotName} â€¢ {task.date}
-                                </p>
-                                <p className="text-xs text-[#6B7280]">Worker: {task.assignedWorker ?? 'Unassigned'}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        ))}
+                          return (
+                            <TooltipProvider key={task.id}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div
+                                    className={`text-[12px] px-2 py-1 rounded-lg ${getTaskContainerClasses(task)} ${getTaskTextColor(task)} ${isPastTask ? 'cursor-default' : 'cursor-pointer'}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!isPastTask) setSelectedTask(task);
+                                    }}
+                                    aria-disabled={isPastTask}
+                                  >
+                                    <p className="flex items-center gap-1 min-w-0">
+                                      {StatusIcon && <StatusIcon size={12} className="text-current" aria-hidden="true" />}
+                                      <span className="truncate">
+                                        {isPastTask ? `Done: ${task.title}` : task.title}
+                                      </span>
+                                    </p>
+                                    <p className={`text-[10px] truncate ${getTaskTextColor(task, 'secondary')}`}>
+                                      {task.assignedWorker ?? 'Unassigned'}
+                                    </p>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-[220px]">
+                                  <p className="font-medium">{task.title}</p>
+                                  <p className="text-xs text-[#6B7280]">{task.plotName} ??? {task.date}</p>
+                                  <p className="text-xs text-[#6B7280]">Worker: {task.assignedWorker ?? 'Unassigned'}</p>
+                                  {isPastTask && (
+                                    <p className="text-xs text-gray-500">Task completed on {formatTaskDate(task.date)}</p>
+                                  )}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          );
+                        })}
 
                         {dayTasks.length > maxVisible && (
                           <Badge className="absolute top-2 right-2 bg-[#111827] text-white text-[11px] rounded-full px-2">
@@ -561,40 +650,48 @@ export function SchedulePage() {
           <div className="p-4">
             <div
               className={`space-y-3 ${isSameDay(currentDate, today)
-                ? 'rounded-xl bg-[#F0FDF4] border border-[#86EFAC] ring-1 ring-[#BBF7D0]'
+                ? 'rounded-xl bg-slate-50 ring-2 ring-blue-300'
                 : ''
                 }`}
             >
-              {getDayTasks().map((task) => (
-                <div
-                  key={task.id}
-                  className="p-3 rounded-xl border border-[#E5E7EB] hover:bg-[#F9FAFB] cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedTask(task);
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    {/* LEFT */}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[14px] text-[#111827] font-medium truncate">
-                        {task.title}
-                      </p>
-                      <p className="text-[12px] text-[#6B7280] truncate">
-                        {task.plotName} â€¢ {task.date}
-                      </p>
-                      <p className="text-[12px] text-[#6B7280] truncate">
-                        Worker: {task.assignedWorker ?? 'Unassigned'}
-                      </p>
-                    </div>
+              {getDayTasks().map((task) => {
+                const isPastTask = isPastDate(task.date);
 
-                    {/* RIGHT */}
-                    <div className="shrink-0">
-                      <StatusBadge status={task.status} />
+                return (
+                  <div
+                    key={task.id}
+                    className={`p-3 rounded-xl ${getTaskContainerClasses(task)} ${isPastTask
+                      ? 'cursor-default'
+                      : 'cursor-pointer transition-shadow hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
+                      }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isPastTask) setSelectedTask(task);
+                    }}
+                    title={isPastTask ? `Task completed on ${formatTaskDate(task.date)}` : undefined}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      {/* LEFT */}
+                      <div className="min-w-0 flex-1">
+                        <p className={`text-[14px] font-medium truncate ${getTaskTextColor(task)}`}>
+                          {task.title}
+                        </p>
+                        <p className={`text-[12px] truncate ${getTaskTextColor(task, 'secondary')}`}>
+                          {task.plotName} ??? {task.date}
+                        </p>
+                        <p className={`text-[12px] truncate ${getTaskTextColor(task, 'secondary')}`}>
+                          Worker: {task.assignedWorker ?? 'Unassigned'}
+                        </p>
+                      </div>
+
+                      {/* RIGHT */}
+                      <div className="shrink-0">
+                        {renderTaskStatusBadge(task)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {getDayTasks().length === 0 && (
                 <p className="text-[12px] text-[#9CA3AF]">No tasks scheduled for this day</p>
@@ -629,7 +726,7 @@ export function SchedulePage() {
           <div className="space-y-3 text-sm">
             <div className="flex items-center justify-between">
               <span className="text-[#6B7280]">Status</span>
-              <StatusBadge status={selectedTask?.status} />
+              {selectedTask ? renderTaskStatusBadge(selectedTask) : null}
             </div>
 
             <div className="flex items-center justify-between">
@@ -683,28 +780,33 @@ export function SchedulePage() {
           </DialogHeader>
 
           <div className="space-y-3">
-            {selectedDateTasks.map((task) => (
-              <div
-                key={task.id}
-                className="p-3 rounded-xl border border-[#E5E7EB] bg-white"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[14px] text-[#111827] font-medium truncate">
-                      {task.title}
-                    </p>
-                    <p className="text-[12px] text-[#6B7280] truncate">
-                      {task.plotName} ({task.plotId})
-                    </p>
+            {selectedDateTasks.map((task) => {
+              const isPastTask = isPastDate(task.date);
+
+              return (
+                <div
+                  key={task.id}
+                  className={`p-3 rounded-xl ${getTaskContainerClasses(task)}`}
+                  title={isPastTask ? `Task completed on ${formatTaskDate(task.date)}` : undefined}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[14px] font-medium truncate ${getTaskTextColor(task)}`}>
+                        {task.title}
+                      </p>
+                      <p className={`text-[12px] truncate ${getTaskTextColor(task, 'secondary')}`}>
+                        {task.plotName} ({task.plotId})
+                      </p>
+                    </div>
+                    {renderTaskStatusBadge(task)}
                   </div>
-                  <StatusBadge status={task.status} />
+                  <div className={`mt-2 text-[12px] ${getTaskTextColor(task, 'secondary')}`}>
+                    <p>Date: {task.date}</p>
+                    <p>Worker: {task.assignedWorker ?? 'Unassigned'}</p>
+                  </div>
                 </div>
-                <div className="mt-2 text-[12px] text-[#6B7280]">
-                  <p>Date: {task.date}</p>
-                  <p>Worker: {task.assignedWorker ?? 'Unassigned'}</p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
 
             {selectedDateTasks.length === 0 && (
               <p className="text-[12px] text-[#9CA3AF]">No tasks for this date under current filters.</p>
