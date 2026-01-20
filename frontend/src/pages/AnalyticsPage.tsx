@@ -30,6 +30,7 @@ export function AnalyticsPage() {
   const [forecastData, setForecastData] = useState<unknown[]>([]); // Forecast structure might vary
   const [weatherData, setWeatherData] = useState<WeatherAnalyticsItem[]>([]);
   const [weatherSuggestions, setWeatherSuggestions] = useState<Suggestion[]>([]);
+  const [sensorAlerts, setSensorAlerts] = useState<Suggestion[]>([]);
   // const [loading, setLoading] = useState(true);
 
   // Fetch real data on mount and when forecast range changes
@@ -52,27 +53,29 @@ export function AnalyticsPage() {
           cleaned_temperature: number;
           soil_moisture: number;
           cleaned_soil_moisture: number;
-          nitrogen: number;
-          cleaned_nitrogen: number;
           [key: string]: unknown;
         }
 
-        const history = await safeFetch<RawBackendHistory[]>(getAnalyticsHistory(30) as unknown as Promise<RawBackendHistory[]>, []);
+        const history = await safeFetch<RawBackendHistory[]>(
+          getAnalyticsHistory(30, selectedPlot !== 'all' ? selectedPlot : undefined) as unknown as Promise<RawBackendHistory[]>, 
+          []
+        );
         const processedHistory: AnalyticsData[] = history.map((item) => ({
           ...item,
           date: item.data_added,
           temperature_raw: item.temperature,
           temperature_clean: item.cleaned_temperature,
           moisture_raw: item.soil_moisture,
-          moisture_clean: item.cleaned_soil_moisture,
-          nitrogen_raw: item.nitrogen,
-          nitrogen_clean: item.cleaned_nitrogen,
+          moisture_clean: item.cleaned_soil_moisture
         }));
         setHistoricalData(processedHistory);
 
-        // 2. Fetch Forecast
+        // 2. Fetch Forecast (filter by selected plot)
         const days = 7;
-        const forecast = await safeFetch<unknown[]>(getAnalyticsForecast(days), []);
+        const forecast = await safeFetch<unknown[]>(
+          getAnalyticsForecast(days, selectedPlot !== 'all' ? selectedPlot : undefined), 
+          []
+        );
         setForecastData(forecast);
 
         // 3. Fetch Recommendations - Removed
@@ -102,7 +105,6 @@ export function AnalyticsPage() {
         if (processedHistory.length > 0) {
            const latest = processedHistory[processedHistory.length - 1];
            sensorSummary = {
-             avg_n: latest.nitrogen_clean,
              avg_moisture: latest.moisture_clean,
              avg_temp: latest.temperature_clean
            };
@@ -118,7 +120,13 @@ export function AnalyticsPage() {
             // but the new backend logic can handle generally.
             // Ideally we pass a broader range of tasks. 
             const result = await getWeatherRescheduleSuggestions(tasksForTomorrow, weatherForecastForTomorrow, sensorSummary);
-            suggestions = result.suggestions ?? [];
+            const allSuggestions = result.suggestions ?? [];
+            
+            // Separate sensor alerts from regular suggestions
+            const alerts = allSuggestions.filter(s => s.affected_by === 'sensor_health');
+            suggestions = allSuggestions.filter(s => s.affected_by !== 'sensor_health');
+            
+            setSensorAlerts(alerts);
         } catch (e) {
             console.error("Insight suggestion error:", e);
         }
@@ -131,7 +139,7 @@ export function AnalyticsPage() {
       }
     }
     fetchData();
-  }, [forecastRange]);
+  }, [forecastRange, selectedPlot]);
 
 
   // Calculate trends safely
@@ -172,44 +180,82 @@ export function AnalyticsPage() {
         </Select>
       </div>
 
-      {/* Trend Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Today's Reading Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Moisture */}
         <Card className="p-5 rounded-2xl bg-white shadow-sm">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-[14px] text-[#6B7280]">Moisture Trend</p>
-            {moistureTrend > 0 ? (
-              <TrendingUp className="text-[#16A34A]" size={20} />
-            ) : (
-              <TrendingDown className="text-[#DC2626]" size={20} />
-            )}
+            <p className="text-[14px] text-[#6B7280]">Soil Moisture</p>
+            <div className="w-8 h-8 bg-[#16A34A] rounded-lg flex items-center justify-center text-white">
+              💧
+            </div>
           </div>
-          <p className="text-[20px] text-[#111827] mb-1">
-            {historicalData.length > 0 ? (historicalData[historicalData.length - 1].moisture_clean || 0).toFixed(1) : '--'}%
+          <p className="text-[28px] font-semibold text-[#111827] mb-1">
+            {todayMoisture.toFixed(1)}%
           </p>
-          <p className={`text-[14px] ${moistureTrend > 0 ? 'text-[#16A34A]' : 'text-[#DC2626]'}`}>
-            {moistureTrend > 0 ? '+' : ''}
-            {moistureTrend.toFixed(1)}% from start
+          <p className="text-[12px] text-[#6B7280]">
+            Latest reading
           </p>
         </Card>
 
+        {/* Temperature */}
         <Card className="p-5 rounded-2xl bg-white shadow-sm">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-[14px] text-[#6B7280]">Nitrogen Trend</p>
-            {nitrogenTrend > 0 ? (
-              <TrendingUp className="text-[#16A34A]" size={20} />
-            ) : (
-              <TrendingDown className="text-[#DC2626]" size={20} />
-            )}
+            <p className="text-[14px] text-[#6B7280]">Temperature</p>
+            <div className="w-8 h-8 bg-[#DC2626] rounded-lg flex items-center justify-center text-white">
+              🌡️
+            </div>
           </div>
-          <p className="text-[20px] text-[#111827] mb-1">
-            {historicalData.length > 0 ? (historicalData[historicalData.length - 1].nitrogen_clean || 0).toFixed(0) : '--'} mg/kg
+          <p className="text-[28px] font-semibold text-[#111827] mb-1">
+            {todayTemperature.toFixed(1)}°C
           </p>
-          <p className={`text-[14px] ${nitrogenTrend > 0 ? 'text-[#16A34A]' : 'text-[#DC2626]'}`}>
-            {nitrogenTrend > 0 ? '+' : ''}
-            {nitrogenTrend.toFixed(0)} mg/kg from start
+          <p className="text-[12px] text-[#6B7280]">
+            Latest reading
+          </p>
+        </Card>
+
+        {/* Weather (Rain) */}
+        <Card className="p-5 rounded-2xl bg-white shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[14px] text-[#6B7280]">Rainfall Today</p>
+            <div className="w-8 h-8 bg-[#3B82F6] rounded-lg flex items-center justify-center text-white">
+              🌧️
+            </div>
+          </div>
+          <p className="text-[28px] font-semibold text-[#111827] mb-1">
+            {todayWeatherRain.toFixed(1)} mm
+          </p>
+          <p className="text-[12px] text-[#6B7280]">
+            Total rainfall
           </p>
         </Card>
       </div>
+
+      {/* Sensor Health Alerts */}
+      {sensorAlerts.length > 0 && (
+        <div className="space-y-2">
+          {sensorAlerts.map((alert, idx) => (
+            <div
+              key={idx}
+              className="bg-gradient-to-r from-[#FEE2E2] to-[#FECACA] border-l-4 border-[#DC2626] rounded-lg p-4 shadow-sm"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-8 h-8 bg-[#DC2626] rounded-full flex items-center justify-center text-white text-lg">
+                  ⚠️
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-[16px] font-semibold text-[#991B1B] mb-1">
+                    {alert.task_name}
+                  </h4>
+                  <p className="text-[14px] text-[#7C2D12] leading-relaxed">
+                    {alert.reason}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Detailed Charts */}
       <Card className="p-6 rounded-2xl bg-white shadow-sm">

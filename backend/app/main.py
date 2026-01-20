@@ -19,7 +19,7 @@ from app.routers import schedule
 from app.routers import plots
 from app.routers import tasks
 from app.routers import suggestions
-from app.routers import users
+from app.routers import config
 
 
 app = FastAPI(title="PineTrack Backend")
@@ -35,6 +35,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(analytics_router)
+app.include_router(config.router)
 
 @app.get("/api/health")
 def health():

@@ -1,59 +1,82 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Switch } from '../components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { defaultThresholds } from '../lib/mockData';
+import { getThresholds, updateThresholds, resetThresholds } from '../lib/api';
 import { toast } from 'sonner';
-import { Save, RotateCcw, Settings, Bell, Database } from 'lucide-react';
+import { Save, RotateCcw, Settings, Database } from 'lucide-react';
 
 export function ConfigurationPage() {
-  const [thresholds, setThresholds] = useState(defaultThresholds);
-  const [notifications, setNotifications] = useState({
-    email: true,
-    sms: false,
-    push: true,
-    criticalOnly: false
+  const [thresholds, setThresholds] = useState({
+    temperature: { min: 0, max: 60 },
+    moisture: { min: 1, max: 100 }
   });
+  const [loading, setLoading] = useState(true);
 
-  const handleSaveThresholds = () => {
-    toast.success('Configuration saved successfully');
+  // Fetch thresholds on component mount
+  useEffect(() => {
+    fetchThresholds();
+  }, []);
+
+  const fetchThresholds = async () => {
+    try {
+      setLoading(true);
+      const data = await getThresholds();
+      setThresholds({
+        temperature: { min: data.temperature_min, max: data.temperature_max },
+        moisture: { min: data.soil_moisture_min, max: data.soil_moisture_max }
+      });
+    } catch (error) {
+      toast.error('Failed to load thresholds');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleResetThresholds = () => {
-    setThresholds(defaultThresholds);
-    toast.info('Thresholds reset to default values');
+  const handleSaveThresholds = async () => {
+    try {
+      await updateThresholds({
+        temperature_min: thresholds.temperature.min,
+        temperature_max: thresholds.temperature.max,
+        soil_moisture_min: thresholds.moisture.min,
+        soil_moisture_max: thresholds.moisture.max
+      });
+      toast.success('Configuration saved successfully');
+    } catch (error) {
+      toast.error('Failed to save configuration');
+      console.error(error);
+    }
   };
 
-  const handleSaveNotifications = () => {
-    toast.success('Notification settings saved');
+  const handleResetThresholds = async () => {
+    try {
+      await resetThresholds();
+      await fetchThresholds(); // Refresh data
+      toast.info('Thresholds reset to default values');
+    } catch (error) {
+      toast.error('Failed to reset thresholds');
+      console.error(error);
+    }
   };
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-[20px] text-[#111827]">System Configuration</h2>
-        <p className="text-[16px] text-[#374151]">Manage thresholds, notifications, and system preferences</p>
+        <p className="text-[16px] text-[#374151]">Manage thresholds and system preferences</p>
       </div>
 
       <Tabs defaultValue="thresholds" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 rounded-xl bg-transparent">
+        <TabsList className="grid w-full grid-cols-2 rounded-xl bg-transparent">
           <TabsTrigger
             value="thresholds"
             className="rounded-lg gap-2 data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8] transition"
           >
             <Settings size={16} />
             Thresholds
-          </TabsTrigger>
-
-          <TabsTrigger
-            value="notifications"
-            className="rounded-lg gap-2 data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8] transition"
-          >
-            <Bell size={16} />
-            Notifications
           </TabsTrigger>
 
           <TabsTrigger
@@ -135,98 +158,6 @@ export function ConfigurationPage() {
                 </div>
               </div>
 
-              {/* pH */}
-              <div className="p-5 bg-[#F9FAFB] rounded-xl">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-8 h-8 bg-[#2563EB] rounded-lg flex items-center justify-center text-white">
-                    🧪
-                  </div>
-                  <div>
-                    <h4 className="text-[#111827]">Soil pH</h4>
-                    <p className="text-xs text-[#6B7280]">Acidity/alkalinity balance</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="phMin">Minimum</Label>
-                    <Input
-                      id="phMin"
-                      type="number"
-                      step="0.1"
-                      value={thresholds.ph.min}
-                      onChange={(e) =>
-                        setThresholds({
-                          ...thresholds,
-                          ph: { ...thresholds.ph, min: Number(e.target.value) }
-                        })
-                      }
-                      className="rounded-xl"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="phMax">Maximum</Label>
-                    <Input
-                      id="phMax"
-                      type="number"
-                      step="0.1"
-                      value={thresholds.ph.max}
-                      onChange={(e) =>
-                        setThresholds({
-                          ...thresholds,
-                          ph: { ...thresholds.ph, max: Number(e.target.value) }
-                        })
-                      }
-                      className="rounded-xl"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Nitrogen */}
-              <div className="p-5 bg-[#F9FAFB] rounded-xl">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-8 h-8 bg-[#CA8A04] rounded-lg flex items-center justify-center text-white">
-                    🍃
-                  </div>
-                  <div>
-                    <h4 className="text-[#111827]">Nitrogen Content</h4>
-                    <p className="text-xs text-[#6B7280]">Essential nutrient for growth</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="nitrogenMin">Minimum (mg/kg)</Label>
-                    <Input
-                      id="nitrogenMin"
-                      type="number"
-                      value={thresholds.nitrogen.min}
-                      onChange={(e) =>
-                        setThresholds({
-                          ...thresholds,
-                          nitrogen: { ...thresholds.nitrogen, min: Number(e.target.value) }
-                        })
-                      }
-                      className="rounded-xl"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nitrogenMax">Maximum (mg/kg)</Label>
-                    <Input
-                      id="nitrogenMax"
-                      type="number"
-                      value={thresholds.nitrogen.max}
-                      onChange={(e) =>
-                        setThresholds({
-                          ...thresholds,
-                          nitrogen: { ...thresholds.nitrogen, max: Number(e.target.value) }
-                        })
-                      }
-                      className="rounded-xl"
-                    />
-                  </div>
-                </div>
-              </div>
-
               {/* Temperature */}
               <div className="p-5 bg-[#F9FAFB] rounded-xl">
                 <div className="flex items-center gap-2 mb-4">
@@ -282,84 +213,6 @@ export function ConfigurationPage() {
                 Save Thresholds
               </Button>
             </div>
-          </Card>
-        </TabsContent>
-
-        {/* Notifications Tab */}
-        <TabsContent value="notifications" className="mt-6 space-y-6">
-          <Card className="p-6 rounded-2xl bg-white">
-            <div className="mb-6">
-              <h3 className="text-[#111827] mb-1">Notification Preferences</h3>
-              <p className="text-sm text-[#6B7280]">
-                Choose how you want to receive alerts and updates
-              </p>
-            </div>
-
-            <div className="space-y-6">
-              <div className="flex items-center justify-between p-4 bg-[#F9FAFB] rounded-xl">
-                <div className="flex-1">
-                  <h4 className="text-[#111827] mb-1">Email Notifications</h4>
-                  <p className="text-sm text-[#6B7280]">Receive alerts via email</p>
-                </div>
-                <Switch
-                  checked={notifications.email}
-                  onCheckedChange={(checked: boolean) =>
-                    setNotifications({ ...notifications, email: checked })
-                  }
-                  aria-label="Toggle email notifications"
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-[#F9FAFB] rounded-xl">
-                <div className="flex-1">
-                  <h4 className="text-[#111827] mb-1">SMS Notifications</h4>
-                  <p className="text-sm text-[#6B7280]">Receive alerts via text message</p>
-                </div>
-                <Switch
-                  checked={notifications.sms}
-                  onCheckedChange={(checked: boolean) =>
-                    setNotifications({ ...notifications, sms: checked })
-                  }
-                  aria-label="Toggle SMS notifications"
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-[#F9FAFB] rounded-xl">
-                <div className="flex-1">
-                  <h4 className="text-[#111827] mb-1">Push Notifications</h4>
-                  <p className="text-sm text-[#6B7280]">Receive in-app notifications</p>
-                </div>
-                <Switch
-                  checked={notifications.push}
-                  onCheckedChange={(checked: boolean) =>
-                    setNotifications({ ...notifications, push: checked })
-                  }
-                  aria-label="Toggle push notifications"
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-[#F9FAFB] rounded-xl">
-                <div className="flex-1">
-                  <h4 className="text-[#111827] mb-1">Critical Alerts Only</h4>
-                  <p className="text-sm text-[#6B7280]">Only receive critical threshold violations</p>
-                </div>
-                <Switch
-                  checked={notifications.criticalOnly}
-                  onCheckedChange={(checked: boolean) =>
-                    setNotifications({ ...notifications, criticalOnly: checked })
-                  }
-                  aria-label="Toggle critical alerts only"
-                />
-              </div>
-            </div>
-
-            <Button
-              className="w-full mt-6 bg-[#15803D] hover:bg-[#16A34A] rounded-xl gap-2"
-              onClick={handleSaveNotifications}
-            >
-              <Save size={16} />
-              Save Notification Settings
-            </Button>
           </Card>
         </TabsContent>
 

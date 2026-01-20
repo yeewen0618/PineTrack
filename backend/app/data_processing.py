@@ -6,9 +6,42 @@ from app.core.supabase_client import supabase
 # --- SECTION 1: CONFIGURATION ---
 # Using the supabase client from app.core.supabase_client which is already configured
 
-def data_processing_pipeline():
+def get_thresholds():
+    """
+    Fetch thresholds from database.
+    Returns default values if table is empty or error occurs.
+    """
+    try:
+        response = supabase.table("thresholds").select("*").limit(1).execute()
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+    except Exception as e:
+        print(f"Warning: Could not fetch thresholds from database: {e}")
+    
+    # Return defaults
+    return {
+        "temperature_min": 0,
+        "temperature_max": 60,
+        "soil_moisture_min": 1,
+        "soil_moisture_max": 100
+    }
+
+def data_processing_pipeline(plot_id=None):
+    """
+    Data processing pipeline for sensor data
+    Args:
+        plot_id (str, optional): Filter data by specific plot (e.g., 'A1', 'A2'). 
+                                 If None, processes all plots.
+    """
     # --- SECTION 2: FETCH RAW DATA FROM SUPABASE (WITH PAGINATION) ---
-    print("Fetching all raw data from Supabase...")
+    if plot_id:
+        print(f"Fetching raw data for plot: {plot_id}")
+    else:
+        print("Fetching all raw data from Supabase...")
+    
+    # Fetch dynamic thresholds from database
+    thresholds = get_thresholds()
+    print(f"Using thresholds: {thresholds}")
     
     all_data = []
     limit = 1000  # Supabase default limit
@@ -16,7 +49,13 @@ def data_processing_pipeline():
     
     while True:
         # Fetch rows in chunks of 1000
-        response = supabase.table("raw_data").select("*").range(offset, offset + limit - 1).execute()
+        query = supabase.table("raw_data").select("*")
+        
+        # Filter by plot if specified
+        if plot_id:
+            query = query.eq("plot_id", plot_id)
+        
+        response = query.range(offset, offset + limit - 1).execute()
         data = response.data
         all_data.extend(data)
         
@@ -78,7 +117,7 @@ def data_processing_pipeline():
         return list(qv_values), list(statuses)
 
     print("Checking required columns...")
-    required_columns = ['temperature', 'soil_moisture', 'nitrogen']
+    required_columns = ['temperature', 'soil_moisture']
     if not all(col in df_raw.columns for col in required_columns):
         print(f"Missing one of the required columns: {required_columns}")
         return
@@ -89,7 +128,7 @@ def data_processing_pipeline():
     df_raw = df_raw.drop_duplicates(subset=['data_added', 'device_id'], keep='first').reset_index(drop=True)
     
     df_cleaned = df_raw.copy()
-    sensors = ['temperature', 'soil_moisture', 'nitrogen']
+    sensors = ['temperature', 'soil_moisture']
 
     # 1. Outlier Repair (3-SD Method)
     # --- SECTION 4: STEP 2 - DATA CLEANING (REPAIR) ---
@@ -103,8 +142,8 @@ def data_processing_pipeline():
         # Repair logic: 
         # 1. Statistical outliers (3-SD)
         # 2. Broken sensors (Value is exactly 0)
-        if s in ['soil_moisture', 'nitrogen']:
-            # For Moisture/Nitrogen: Repair if outlier OR if exactly 0
+        if s == 'soil_moisture':
+            # For Moisture: Repair if outlier OR if exactly 0
             needs_repair = (df_cleaned[s] < (mean - 3*std)) | \
                            (df_cleaned[s] > (mean + 3*std)) | \
                            (df_cleaned[s] == 0)
@@ -152,9 +191,18 @@ def data_processing_pipeline():
 
     # Calculate Quality Assessment on the FINAL Data (Using Raw Values)
     print("Running Quality Assessment on raw data...")
-    temp_qv, temp_status = evaluate_quality(final_df, 'temperature_raw', 0, 60, 10, 3.0)
-    moist_qv, moist_status = evaluate_quality(final_df, 'soil_moisture_raw', 1, 100, 10, 2.0)
-    nitro_qv, nitro_status = evaluate_quality(final_df, 'nitrogen_raw', 1, 1000, 10, 1.0)
+    temp_qv, temp_status = evaluate_quality(
+        final_df, 'temperature_raw', 
+        thresholds['temperature_min'], 
+        thresholds['temperature_max'], 
+        10, 3.0
+    )
+    moist_qv, moist_status = evaluate_quality(
+        final_df, 'soil_moisture_raw', 
+        thresholds['soil_moisture_min'], 
+        thresholds['soil_moisture_max'], 
+        10, 2.0
+    )
 
     # Prepare list of dictionaries for Supabase upload
     records = []
@@ -171,20 +219,16 @@ def data_processing_pipeline():
             # RAW Data (Using the resampled raw values, so they align with the hour)
             "temperature": clean_val(row['temperature_raw']),
             "soil_moisture": clean_val(row['soil_moisture_raw']),
-            "nitrogen": clean_val(row['nitrogen_raw']),
             
             # CLEANED Data
             "cleaned_temperature": clean_val(row['temperature_clean']),
             "cleaned_soil_moisture": clean_val(row['soil_moisture_clean']),
-            "cleaned_nitrogen": clean_val(row['nitrogen_clean']),
             
             # QUALITY METRICS (Calculated on the aligned data)
             "temperature_qv": temp_qv[i], 
             "temperature_status": temp_status[i],
             "soil_moisture_qv": moist_qv[i],
             "soil_moisture_status": moist_status[i],
-            "nitrogen_qv": nitro_qv[i], 
-            "nitrogen_status": nitro_status[i],
         })
 
     # --- SECTION 6: UPLOAD TO SUPABASE (BATCHED) ---
