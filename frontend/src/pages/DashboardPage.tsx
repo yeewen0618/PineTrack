@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { WeatherCard } from '../components/WeatherCard';
 import { PlotCard } from '../components/PlotCard';
-import { Sun, CloudSun, CloudRain, Cloud, Calendar, Users } from 'lucide-react';
+import { Sun, CloudSun, CloudRain, Cloud, Calendar, Users, AlertTriangle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 
