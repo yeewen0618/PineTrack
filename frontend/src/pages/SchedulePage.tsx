@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -54,56 +54,75 @@ export function SchedulePage() {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const day = currentDate.getDate();
+  const today = new Date();
+
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const parseDateString = (dateStr: string) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+
+  const loadScheduleData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [plotsRes, tasksRes] = await Promise.all([
+        listPlots(),
+        listTasks(), // Note: all tasks
+      ]);
+
+      const plotsData = plotsRes.data ?? [];
+      setPlots(plotsData);
+
+      const nameById = new Map(plotsData.map((p) => [p.id, p.name]));
+
+      const vm: ScheduleTaskVM[] = (tasksRes.data ?? []).map((t: {
+        id: string;
+        title: string;
+        decision?: "Proceed" | "Pending" | "Stop";
+        status?: "Proceed" | "Pending" | "Stop";
+        task_date: string;
+        plot_id: string;
+        description?: string | null;
+        assigned_worker_name?: string | null;
+        reason?: string | null;
+      }) => ({
+        id: t.id,
+        title: t.title,
+        status: t.decision ?? t.status,
+        date: t.task_date,
+        plotId: t.plot_id,
+        plotName: nameById.get(t.plot_id) ?? t.plot_id,
+        description: t.description ?? null,
+        assignedWorker: t.assigned_worker_name ?? null,
+        reason: t.reason ?? null,
+      }));
+
+      setTasks(vm);
+
+      // Note: ensure default filter stays global
+      setFilterPlot("all");
+    } catch (e) {
+      toast.error((e as Error)?.message ?? "Failed to load schedule data");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const [plotsRes, tasksRes] = await Promise.all([
-          listPlots(),
-          listTasks(), // ✅ all tasks
-        ]);
+    loadScheduleData();
+  }, [loadScheduleData]);
 
-        const plotsData = plotsRes.data ?? [];
-        setPlots(plotsData);
-
-        const nameById = new Map(plotsData.map((p) => [p.id, p.name]));
-
-        const vm: ScheduleTaskVM[] = (tasksRes.data ?? []).map((t: {
-          id: string;
-          title: string;
-          decision?: "Proceed" | "Pending" | "Stop";
-          status?: "Proceed" | "Pending" | "Stop";
-          task_date: string;
-          plot_id: string;
-          description?: string | null;
-          assigned_worker_name?: string | null;
-          reason?: string | null;
-        }) => ({
-          id: t.id,
-          title: t.title,
-          status: t.decision ?? t.status,
-          date: t.task_date,
-          plotId: t.plot_id,
-          plotName: nameById.get(t.plot_id) ?? t.plot_id,
-          description: t.description ?? null,
-          assignedWorker: t.assigned_worker_name ?? null,
-          reason: t.reason ?? null,
-        }));
-
-        setTasks(vm);
-
-        // ✅ ensure default filter stays global
-        setFilterPlot("all");
-      } catch (e) {
-        toast.error((e as Error)?.message ?? "Failed to load schedule data");
-      } finally {
-        setLoading(false);
-      }
+  useEffect(() => {
+    const handler = () => {
+      loadScheduleData();
     };
-
-    load();
-  }, []);
+    window.addEventListener("tasks:refresh", handler);
+    return () => window.removeEventListener("tasks:refresh", handler);
+  }, [loadScheduleData]);
 
 
   // Generate calendar days for month view
@@ -350,7 +369,7 @@ export function SchedulePage() {
         {/* Loading hint */}
         {loading && (
           <div className="p-4 text-sm text-[#6B7280]">
-            Loading schedule from database…
+            Loading schedule from databaseâ€¦
           </div>
         )}
 
@@ -374,11 +393,15 @@ export function SchedulePage() {
                 const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                 const dayTasks = getTasksForDay(d);
                 const maxVisible = 1;
+                const isToday = isSameDay(new Date(year, month, d), today);
 
                 return (
                   <div
                     key={d}
-                    className="h-[84px] border border-[#E5E7EB] rounded-xl bg-white p-2 relative cursor-pointer"
+                    className={`h-[84px] border rounded-xl p-2 relative cursor-pointer ${isToday
+                      ? 'bg-[#F0FDF4] border-[#86EFAC] ring-1 ring-[#BBF7D0]'
+                      : 'bg-white border-[#E5E7EB]'
+                      }`}
                     onClick={() => setSelectedDate(dateStr)}
                     role="button"
                     tabIndex={0}
@@ -413,7 +436,7 @@ export function SchedulePage() {
                             </TooltipTrigger>
                             <TooltipContent className="max-w-[220px]">
                               <p className="font-medium">{task.title}</p>
-                              <p className="text-xs text-[#6B7280]">{task.plotName} • {task.date}</p>
+                              <p className="text-xs text-[#6B7280]">{task.plotName} â€¢ {task.date}</p>
                               <p className="text-xs text-[#6B7280]">Worker: {task.assignedWorker ?? 'Unassigned'}</p>
                             </TooltipContent>
                           </Tooltip>
@@ -436,7 +459,7 @@ export function SchedulePage() {
         {/* Week View (Month-style, one row) */}
         {viewMode === 'week' && (
           <div className="p-4">
-            {/* Day headers (Mon → Sun) */}
+            {/* Day headers (Mon â†’ Sun) */}
             <div className="grid grid-cols-7 gap-2 mb-2">
               {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((dayName) => (
                 <div
@@ -453,7 +476,7 @@ export function SchedulePage() {
               {(() => {
                 const week = getWeekTasks();
 
-                // Reorder to Mon → Sun (in case your getWeekTasks() is Sun → Sat)
+                // Reorder to Mon â†’ Sun (in case your getWeekTasks() is Sun â†’ Sat)
                 const order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
                 const weekOrdered = [...week].sort(
                   (a, b) => order.indexOf(a.dayName) - order.indexOf(b.dayName)
@@ -463,11 +486,15 @@ export function SchedulePage() {
 
                 return weekOrdered.map((dayData) => {
                   const dayTasks = dayData.tasks ?? [];
+                  const isToday = isSameDay(parseDateString(dayData.date), today);
 
                   return (
                     <div
                       key={dayData.date}
-                      className="h-[84px] border border-[#E5E7EB] rounded-xl bg-white p-2 relative cursor-pointer"
+                      className={`h-[84px] border rounded-xl p-2 relative cursor-pointer ${isToday
+                        ? 'bg-[#F0FDF4] border-[#86EFAC] ring-1 ring-[#BBF7D0]'
+                        : 'bg-white border-[#E5E7EB]'
+                        }`}
                       onClick={() => setSelectedDate(dayData.date)}
                       role="button"
                       tabIndex={0}
@@ -505,7 +532,7 @@ export function SchedulePage() {
                               <TooltipContent className="max-w-[220px]">
                                 <p className="font-medium">{task.title}</p>
                                 <p className="text-xs text-[#6B7280]">
-                                  {task.plotName} • {task.date}
+                                  {task.plotName} â€¢ {task.date}
                                 </p>
                                 <p className="text-xs text-[#6B7280]">Worker: {task.assignedWorker ?? 'Unassigned'}</p>
                               </TooltipContent>
@@ -532,7 +559,12 @@ export function SchedulePage() {
         {/* Day View */}
         {viewMode === 'day' && (
           <div className="p-4">
-            <div className="space-y-3">
+            <div
+              className={`space-y-3 ${isSameDay(currentDate, today)
+                ? 'rounded-xl bg-[#F0FDF4] border border-[#86EFAC] ring-1 ring-[#BBF7D0]'
+                : ''
+                }`}
+            >
               {getDayTasks().map((task) => (
                 <div
                   key={task.id}
@@ -549,7 +581,7 @@ export function SchedulePage() {
                         {task.title}
                       </p>
                       <p className="text-[12px] text-[#6B7280] truncate">
-                        {task.plotName} • {task.date}
+                        {task.plotName} â€¢ {task.date}
                       </p>
                       <p className="text-[12px] text-[#6B7280] truncate">
                         Worker: {task.assignedWorker ?? 'Unassigned'}
@@ -590,7 +622,7 @@ export function SchedulePage() {
           <DialogHeader>
             <DialogTitle>{selectedTask?.title}</DialogTitle>
             <DialogDescription>
-              {selectedTask?.plotName} • {selectedTask?.date}
+              {selectedTask?.plotName} â€¢ {selectedTask?.date}
             </DialogDescription>
           </DialogHeader>
 
@@ -683,3 +715,5 @@ export function SchedulePage() {
     </div>
   );
 }
+
+

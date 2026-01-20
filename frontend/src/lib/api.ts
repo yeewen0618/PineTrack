@@ -432,6 +432,44 @@ export interface Thresholds {
   updated_at: string;
 }
 
+export interface TaskEvalThresholds {
+  id: string;
+  name?: string | null;
+  is_active: boolean;
+  soil_moisture_min: number;
+  soil_moisture_max: number;
+  temperature_min: number;
+  temperature_max: number;
+  rain_mm_min: number;
+  rain_mm_heavy: number;
+  waterlogging_hours: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export type TaskEvalThresholdUpdate = Omit<
+  TaskEvalThresholds,
+  "id" | "name" | "is_active" | "created_at" | "updated_at"
+>;
+
+export type EvaluateStatusThresholdPayload = {
+  plot_id: string;
+  date: string;
+  device_id?: number;
+  reschedule_days?: number;
+  thresholds?: Record<string, number>;
+  readings?: Record<string, number>;
+};
+
+export type EvaluateStatusThresholdResponse = {
+  message: string;
+  plot_id: string;
+  date: string;
+  updated: number;
+  reading_device_id?: number | null;
+  reading_timestamp?: string | null;
+};
+
 export async function getThresholds(): Promise<Thresholds> {
   const res = await fetch(`${API_BASE}/config/thresholds`, {
     method: "GET",
@@ -461,4 +499,32 @@ export async function resetThresholds() {
   
   if (!res.ok) throw new Error("Failed to reset thresholds");
   return res.json();
+}
+
+export async function getTaskEvalThresholds(): Promise<TaskEvalThresholds> {
+  const res = await fetch(`${API_BASE}/api/config/task-eval-thresholds`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" }
+  });
+
+  if (!res.ok) throw new Error("Failed to fetch task evaluation thresholds");
+  return res.json();
+}
+
+export async function updateTaskEvalThresholds(data: TaskEvalThresholdUpdate) {
+  const res = await fetch(`${API_BASE}/api/config/task-eval-thresholds`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+
+  if (!res.ok) throw new Error("Failed to update task evaluation thresholds");
+  return res.json();
+}
+
+export async function evaluateStatusThreshold(payload: EvaluateStatusThresholdPayload) {
+  return apiFetch<EvaluateStatusThresholdResponse>("/api/schedule/evaluate-status-threshold", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

@@ -24,6 +24,7 @@ import type { Task } from '../lib/api';
 import { CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { InsightRecommendationsCard, type InsightSuggestion } from '../components/insights/InsightRecommendationsCard';
+import { ReasonCard } from '../components/ReasonCard';
 
 export function RescheduleCenterPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -222,7 +223,7 @@ export function RescheduleCenterPage() {
 
         {rescheduleTasks.length > 0 ? (
           <div className="overflow-x-auto">
-            <Table>
+            <Table className="table-fixed w-full">
               <TableHeader>
                 <TableRow className="bg-[#F9FAFB] hover:bg-[#F9FAFB] border-b border-[#E5E7EB]">
                   <TableHead className="pl-8 text-[14px]">Plot</TableHead>
@@ -230,12 +231,13 @@ export function RescheduleCenterPage() {
                   <TableHead className="text-[14px]">Original Date</TableHead>
                   <TableHead className="text-[14px]">Proposed Date</TableHead>
                   <TableHead className="text-[14px]">Status</TableHead>
-                  <TableHead className="text-[14px]">Reason</TableHead>
-                  <TableHead className="text-right pr-8 text-[14px]">Actions</TableHead>
+                  <TableHead className="text-[14px] w-[320px]">Reason</TableHead>
+                  <TableHead className="text-right pr-8 text-[14px] w-[220px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rescheduleTasks.map((task) => (
+                {rescheduleTasks.map((task) => {
+                  return (
                   <TableRow 
                     key={task.id} 
                     className="hover:bg-[#F0FDF4] transition-colors border-b border-[#E5E7EB]"
@@ -261,10 +263,10 @@ export function RescheduleCenterPage() {
                     <TableCell>
                       <StatusBadge status={task.decision} />
                     </TableCell>
-                    <TableCell>
-                      <p className="text-[14px] text-[#6B7280] max-w-xs">{task.reason}</p>
+                    <TableCell className="w-[320px] align-top">
+                      <ReasonCard reasonText={task.reason ?? ''} status={task.decision} />
                     </TableCell>
-                    <TableCell className="text-right pr-8">
+                    <TableCell className="text-right pr-8 w-[220px]">
                       <div className="flex justify-end gap-2">
                         <Button
                           size="sm"
@@ -286,7 +288,7 @@ export function RescheduleCenterPage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                )})}
               </TableBody>
             </Table>
           </div>

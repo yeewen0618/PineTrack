@@ -15,9 +15,8 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from '../components/ui/tooltip';
-import { SensorAnalyticsTabs } from '../components/analytics/SensorAnalyticsTabs';
-import type { AnalyticsData, WeatherAnalyticsItem, ForecastRange } from '../components/analytics/SensorAnalyticsTabs';
-import { getPlotById, getAnalyticsHistory, getAnalyticsForecast, getWeatherAnalytics, listTasks } from "../lib/api";
+import { GraphSection } from '../components/analytics/GraphSection';
+import { getPlotById, listTasks } from "../lib/api";
 import type { Plot, Task } from "../lib/api";
 import { calcHarvestProgressPercent } from '../lib/progress';
 
@@ -38,10 +37,6 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
   const [loading, setLoading] = useState(false);
   // mock-backed
   const [newObservation, setNewObservation] = useState('');
-  const [forecastRange, setForecastRange] = useState<ForecastRange>('1W');
-  const [historicalData, setHistoricalData] = useState<AnalyticsData[]>([]);
-  const [forecastData, setForecastData] = useState<unknown[]>([]);
-  const [weatherData, setWeatherData] = useState<WeatherAnalyticsItem[]>([]);
 
   const plotObservations = useMemo(() => {
     if (!id) return [];
@@ -76,60 +71,6 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
 
     load();
   }, [id]);
-
-  useEffect(() => {
-    if (!id) return;
-
-    const fetchAnalytics = async () => {
-      const safeFetch = async <T,>(promise: Promise<T>, fallback: T): Promise<T> => {
-        try {
-          return await promise;
-        } catch (e) {
-          console.error("Partial fetch error:", e);
-          return fallback;
-        }
-      };
-      try {
-        interface RawBackendHistory {
-          data_added: string;
-          temperature: number;
-          cleaned_temperature: number;
-          soil_moisture: number;
-          cleaned_soil_moisture: number;
-          nitrogen: number;
-          cleaned_nitrogen: number;
-          [key: string]: unknown;
-        }
-
-        const history = await safeFetch<RawBackendHistory[]>(
-          getAnalyticsHistory(30, id) as unknown as Promise<RawBackendHistory[]>,
-          []
-        );
-        const processedHistory: AnalyticsData[] = history.map((item) => ({
-          ...item,
-          date: item.data_added,
-          temperature_raw: item.temperature,
-          temperature_clean: item.cleaned_temperature,
-          moisture_raw: item.soil_moisture,
-          moisture_clean: item.cleaned_soil_moisture,
-          nitrogen_raw: item.nitrogen,
-          nitrogen_clean: item.cleaned_nitrogen,
-        }));
-        setHistoricalData(processedHistory);
-
-        const days = 7;
-        const forecast = await safeFetch<unknown[]>(getAnalyticsForecast(days, id), []);
-        setForecastData(forecast);
-
-        const weather = await safeFetch<WeatherAnalyticsItem[]>(getWeatherAnalytics(id), []);
-        setWeatherData(weather);
-      } catch (err) {
-        console.error("Critical error in plot analytics:", err);
-      }
-    };
-
-    fetchAnalytics();
-  }, [id, forecastRange]);
 
   // If user somehow lands here without plotId, send them back
   if (!plotId) return <Navigate to="/plots" replace />;
@@ -246,15 +187,7 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
           {/* Sensor Data Charts */}
-          <Card className="p-6 rounded-2xl bg-white shadow-sm">
-            <SensorAnalyticsTabs
-              historicalData={historicalData}
-              forecastData={forecastData}
-              weatherData={weatherData}
-              forecastRange={forecastRange}
-              onForecastRangeChange={setForecastRange}
-            />
-          </Card>
+          <GraphSection plotId={null} />
 
           {/* Calendar View */}
           <Card className="p-6 rounded-2xl bg-white shadow-sm">

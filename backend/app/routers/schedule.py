@@ -19,9 +19,11 @@ from app.reschedule_engine import (
 )
 from app.weather_service import fetch_weather_data
 from app.schemas.schedule import GenerateScheduleRequest, EvaluateThresholdStatusRequest
+from app.services.task_eval_threshold_service import TASK_EVAL_DEFAULTS, get_task_eval_thresholds_payload
 
 router = APIRouter(prefix="/api/schedule", tags=["Schedule"])
 logger = logging.getLogger(__name__)
+MAX_LOOKAHEAD_DAYS = 7
 
 
 class InsightsRequest(BaseModel):
@@ -163,6 +165,45 @@ def _get_rain_metrics(calendar: Dict[str, float], base_date: date) -> tuple[floa
         next_date = base_date + timedelta(days=offset)
         rain_next_3d += float(calendar.get(next_date.isoformat(), 0.0) or 0.0)
     return rain_today, rain_next_3d
+
+
+def _is_rain_sensitive(task_title: str) -> bool:
+    title = (task_title or "").lower()
+    keywords = [
+        "fertil",
+        "spray",
+        "hormone",
+        "foliar",
+        "pesticide",
+        "insecticide",
+        "flower induction",
+    ]
+    return any(keyword in title for keyword in keywords)
+
+
+def _find_next_safe_date(
+    target_date: date,
+    reschedule_days: int,
+    max_lookahead_days: int,
+    weather_calendar: Dict[str, float],
+    rain_mm_min: float,
+    rain_mm_heavy: float,
+    task_title: str,
+) -> tuple[date, str]:
+    for offset in range(1, max_lookahead_days + 1):
+        candidate = target_date + timedelta(days=offset)
+        rain = float(weather_calendar.get(candidate.isoformat(), 0.0) or 0.0)
+        if rain_mm_heavy is not None and rain >= rain_mm_heavy:
+            continue
+        if rain_mm_min is not None and rain >= rain_mm_min and _is_rain_sensitive(task_title):
+            continue
+        rationale = (
+            f"Rescheduled to next safe day ({candidate.isoformat()}) based on rain forecast."
+        )
+        return candidate, rationale
+
+    fallback = target_date + timedelta(days=reschedule_days)
+    return fallback, "Fallback: no safe day found within window."
 
 
 def _looks_like_date(value: Any) -> bool:
@@ -374,15 +415,16 @@ def generate_schedule(payload: GenerateScheduleRequest, user=Depends(get_current
         horizon_days=getattr(payload, "horizon_days", 120),
     )
 
-@router.post("/evaluate-status-threshold")
-def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depends(get_current_user)):
-    plot_id = payload.plot_id
-    target_date = payload.date
-    device_id = payload.device_id or 205
-    readings = payload.readings or {}
-    thresholds = payload.thresholds
-    reschedule_days = payload.reschedule_days
-
+def evaluate_status_threshold_core(
+    plot_id: str,
+    target_date: date,
+    device_id: int = 205,
+    reschedule_days: int = 2,
+    readings: Optional[Dict[str, float]] = None,
+    thresholds: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    readings = readings or {}
+    payload_thresholds = thresholds or {}
     reading_meta = None
 
     # Fetch latest cleaned_data for device_id (prefer data_added desc, fallback to processed_at desc)
@@ -435,7 +477,7 @@ def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depe
         logger.warning("WARNING: No sensor data found for device_id = %s", device_id)
         logger.info("DEBUG: cleaned_data query device_id=%s", device_id)
         logger.info("DEBUG: cleaned_data row fetched: %s", cleaned_row)
-        if payload.readings:
+        if readings:
             reading_meta = {
                 "device_id": device_id,
                 "timestamp": None,
@@ -445,6 +487,65 @@ def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depe
                 status_code=400,
                 detail=f"No cleaned_data found for device_id={device_id} and no readings provided",
             )
+
+    soil_moisture_val = readings.get("soil_moisture")
+    temperature_val = readings.get("temperature")
+    nitrogen_val = readings.get("nitrogen")
+
+    soil_moisture_val = (
+        float(soil_moisture_val) if soil_moisture_val is not None else None
+    )
+    temperature_val = (
+        float(temperature_val) if temperature_val is not None else None
+    )
+    nitrogen_val = float(nitrogen_val) if nitrogen_val is not None else None
+
+    thresholds_used: Dict[str, float] = {}
+    thresholds_source = "default"
+    threshold_profile_name = None
+    relevant_threshold_keys = {
+        "soil_moisture_min",
+        "soil_moisture_max",
+        "soil_moisture_field_max",
+        "temperature_min",
+        "temperature_max",
+        "nitrogen_min",
+        "nitrogen_max",
+        "ph_min",
+        "ph_max",
+    }
+    has_payload_thresholds = any(
+        key in payload_thresholds and payload_thresholds[key] is not None
+        for key in relevant_threshold_keys
+    )
+
+    if payload_thresholds and has_payload_thresholds:
+        thresholds_used = {k: v for k, v in payload_thresholds.items() if v is not None}
+        thresholds_source = "payload"
+    else:
+        db_thresholds, threshold_row = get_task_eval_thresholds_payload()
+        if db_thresholds:
+            thresholds_used = db_thresholds
+            thresholds_source = "db"
+            if threshold_row:
+                threshold_profile_name = threshold_row.get("name")
+        else:
+            thresholds_used = TASK_EVAL_DEFAULTS.copy()
+            thresholds_source = "default"
+
+    if (
+        "soil_moisture_field_max" not in thresholds_used
+        and "soil_moisture_max" in thresholds_used
+    ):
+        thresholds_used["soil_moisture_field_max"] = thresholds_used["soil_moisture_max"]
+
+    logger.info("Thresholds source=%s thresholds_used=%s", thresholds_source, thresholds_used)
+    logger.info(
+        "Sensor values: soil_moisture=%s temperature=%s nitrogen=%s",
+        soil_moisture_val,
+        temperature_val,
+        nitrogen_val,
+    )
 
     # 1) Load tasks for that plot + date
     tasks_res = (
@@ -471,35 +572,83 @@ def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depe
     rain_today, rain_next_3d = _get_rain_metrics(weather_calendar, target_date)
 
     # 2) Example threshold-based rules (expand later)
-    soil_moisture = readings.get("soil_moisture")
-    temperature = readings.get("temperature")
-    nitrogen = readings.get("nitrogen")
-    moisture_max = thresholds.get("soil_moisture_max")
+    moisture_max = thresholds_used.get("soil_moisture_max")
+    moisture_field_max = thresholds_used.get("soil_moisture_field_max")
+    temperature_min = thresholds_used.get("temperature_min")
+    temperature_max = thresholds_used.get("temperature_max")
+    rain_mm_min = thresholds_used.get("rain_mm_min", 2.0)
+    rain_mm_heavy = thresholds_used.get("rain_mm_heavy", 10.0)
 
     for t in tasks:
+        threshold_reasons: List[str] = []
         new_status = "Proceed"
         new_reason = "Proceed (thresholds OK)"
         new_proposed_date = None
 
-        # Rule: if watering but soil moisture too high -> Pending + reschedule
         if t["type"] in ["watering", "irrigation"]:
-            if soil_moisture is not None and moisture_max is not None and soil_moisture > moisture_max:
-                new_status = "Pending"
-                new_reason = f"Soil moisture too high ({soil_moisture} > {moisture_max}); reschedule watering."
-                new_proposed_date = (target_date + timedelta(days=reschedule_days)).isoformat()
+            if (
+                soil_moisture_val is not None
+                and moisture_max is not None
+                and soil_moisture_val > moisture_max
+            ):
+                threshold_reasons.append(
+                    f"Soil moisture {soil_moisture_val:.1f}% exceeded configured max {moisture_max:.1f}%"
+                )
 
-        # Rule: if any "field work" but soil too wet -> Pending
         if t["type"] in ["weeding", "land-prep", "fertilization"]:
-            moisture_field_max = thresholds.get("soil_moisture_field_max")
-            if soil_moisture is not None and moisture_field_max is not None and soil_moisture > moisture_field_max:
-                new_status = "Pending"
-                new_reason = f"Field too wet ({soil_moisture} > {moisture_field_max}); postpone task."
-                new_proposed_date = (target_date + timedelta(days=reschedule_days)).isoformat()
+            if (
+                soil_moisture_val is not None
+                and moisture_field_max is not None
+                and soil_moisture_val > moisture_field_max
+            ):
+                threshold_reasons.append(
+                    f"Soil moisture {soil_moisture_val:.1f}% exceeded configured field max {moisture_field_max:.1f}%"
+                )
+
+        if (
+            temperature_val is not None
+            and temperature_max is not None
+            and temperature_val > temperature_max
+        ):
+            threshold_reasons.append(
+                f"Temperature {temperature_val:.1f}C exceeded configured max {temperature_max:.1f}C"
+            )
+
+        if (
+            temperature_val is not None
+            and temperature_min is not None
+            and temperature_val < temperature_min
+        ):
+            threshold_reasons.append(
+                f"Temperature {temperature_val:.1f}C below configured min {temperature_min:.1f}C"
+            )
+
+        if threshold_reasons:
+            profile_suffix = (
+                f" (threshold profile: {threshold_profile_name})"
+                if threshold_profile_name
+                else ""
+            )
+            new_status = "Pending"
+            reason_detail = " | ".join(threshold_reasons)
+            proposed_date, reschedule_reason = _find_next_safe_date(
+                target_date=target_date,
+                reschedule_days=reschedule_days,
+                max_lookahead_days=MAX_LOOKAHEAD_DAYS,
+                weather_calendar=weather_calendar,
+                rain_mm_min=float(rain_mm_min),
+                rain_mm_heavy=float(rain_mm_heavy),
+                task_title=t.get("title") or "",
+            )
+            new_reason = (
+                f"Pending: {reason_detail}{profile_suffix}. {reschedule_reason}"
+            )
+            new_proposed_date = proposed_date.isoformat()
 
         features = {
-            "soil_moisture": float(soil_moisture or 0.0),
-            "temperature": float(temperature or 0.0),
-            "nitrogen": float(nitrogen or 0.0),
+            "soil_moisture": float(soil_moisture_val if soil_moisture_val is not None else 0.0),
+            "temperature": float(temperature_val if temperature_val is not None else 0.0),
+            "nitrogen": float(nitrogen_val if nitrogen_val is not None else 0.0),
             "rain_today": rain_today,
             "rain_next_3d": rain_next_3d,
             "task_type": str(t.get("type") or "").lower(),
@@ -540,6 +689,17 @@ def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depe
         "reading_device_id": reading_meta.get("device_id") if reading_meta else None,
         "reading_timestamp": reading_meta.get("timestamp") if reading_meta else None,
     }
+
+@router.post("/evaluate-status-threshold")
+def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depends(get_current_user)):
+    return evaluate_status_threshold_core(
+        plot_id=payload.plot_id,
+        target_date=payload.date,
+        device_id=payload.device_id or 205,
+        reschedule_days=payload.reschedule_days,
+        readings=payload.readings,
+        thresholds=payload.thresholds,
+    )
 
 
 # Usage: frontend posts /api/schedule/insights with plot_id/date to populate Insight Recommendation card.

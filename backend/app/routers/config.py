@@ -1,6 +1,8 @@
+from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.core.supabase_client import supabase
+from app.services.threshold_service import DEFAULT_THRESHOLDS, get_active_threshold_payload
 from typing import Optional
 
 router = APIRouter(
@@ -31,20 +33,28 @@ def get_thresholds():
     Returns default values if no config exists.
     """
     try:
-        response = supabase.table("thresholds").select("*").limit(1).execute()
-        
-        if response.data and len(response.data) > 0:
-            return response.data[0]
-        else:
-            # Return defaults if table is empty
+        thresholds, row = get_active_threshold_payload()
+        merged = {**DEFAULT_THRESHOLDS, **thresholds}
+        if row:
+            updated_at = row.get("created_at") or row.get("updated_at") or ""
             return {
-                "id": 0,
-                "temperature_min": 0,
-                "temperature_max": 60,
-                "soil_moisture_min": 1,
-                "soil_moisture_max": 100,
-                "updated_at": ""
+                "id": row.get("id") or 0,
+                "temperature_min": merged["temperature_min"],
+                "temperature_max": merged["temperature_max"],
+                "soil_moisture_min": merged["soil_moisture_min"],
+                "soil_moisture_max": merged["soil_moisture_max"],
+                "updated_at": updated_at,
             }
+
+        # Return defaults if table is empty
+        return {
+            "id": 0,
+            "temperature_min": DEFAULT_THRESHOLDS["temperature_min"],
+            "temperature_max": DEFAULT_THRESHOLDS["temperature_max"],
+            "soil_moisture_min": DEFAULT_THRESHOLDS["soil_moisture_min"],
+            "soil_moisture_max": DEFAULT_THRESHOLDS["soil_moisture_max"],
+            "updated_at": "",
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch thresholds: {str(e)}")
 
@@ -53,38 +63,70 @@ def get_thresholds():
 def update_thresholds(thresholds: ThresholdUpdate):
     """
     Update threshold configuration.
-    Creates new record if none exists, otherwise updates the first record.
+    Updates the latest record (single source of truth).
     """
     try:
-        # Check if thresholds exist
-        response = supabase.table("thresholds").select("id").limit(1).execute()
-        
-        update_data = {}
-        if thresholds.temperature_min is not None:
-            update_data["temperature_min"] = thresholds.temperature_min
-        if thresholds.temperature_max is not None:
-            update_data["temperature_max"] = thresholds.temperature_max
-        if thresholds.soil_moisture_min is not None:
-            update_data["soil_moisture_min"] = thresholds.soil_moisture_min
-        if thresholds.soil_moisture_max is not None:
-            update_data["soil_moisture_max"] = thresholds.soil_moisture_max
-        
-        if response.data and len(response.data) > 0:
-            # Update existing record
-            threshold_id = response.data[0]["id"]
-            result = supabase.table("thresholds").update(update_data).eq("id", threshold_id).execute()
-            return {"message": "Thresholds updated successfully", "data": result.data[0]}
-        else:
-            # Insert new record with defaults
-            insert_data = {
-                "temperature_min": thresholds.temperature_min or 0,
-                "temperature_max": thresholds.temperature_max or 60,
-                "soil_moisture_min": thresholds.soil_moisture_min or 1,
-                "soil_moisture_max": thresholds.soil_moisture_max or 100,
+        _, row = get_active_threshold_payload()
+        if not row:
+            insert_defaults = {
+                "temperature_min": DEFAULT_THRESHOLDS["temperature_min"],
+                "temperature_max": DEFAULT_THRESHOLDS["temperature_max"],
+                "soil_moisture_min": DEFAULT_THRESHOLDS["soil_moisture_min"],
+                "soil_moisture_max": DEFAULT_THRESHOLDS["soil_moisture_max"],
             }
-            result = supabase.table("thresholds").insert(insert_data).execute()
-            return {"message": "Thresholds created successfully", "data": result.data[0]}
-            
+            inserted = supabase.table("thresholds").insert(insert_defaults).execute()
+            row = (inserted.data or [None])[0] or {}
+
+        row_id = row.get("id")
+        if not row_id:
+            raise HTTPException(status_code=500, detail="Failed to locate thresholds row")
+
+        base = {
+            "temperature_min": row.get("temperature_min", DEFAULT_THRESHOLDS["temperature_min"]),
+            "temperature_max": row.get("temperature_max", DEFAULT_THRESHOLDS["temperature_max"]),
+            "soil_moisture_min": row.get("soil_moisture_min", DEFAULT_THRESHOLDS["soil_moisture_min"]),
+            "soil_moisture_max": row.get("soil_moisture_max", DEFAULT_THRESHOLDS["soil_moisture_max"]),
+        }
+
+        update_data = {
+            "temperature_min": (
+                thresholds.temperature_min
+                if thresholds.temperature_min is not None
+                else base["temperature_min"]
+            ),
+            "temperature_max": (
+                thresholds.temperature_max
+                if thresholds.temperature_max is not None
+                else base["temperature_max"]
+            ),
+            "soil_moisture_min": (
+                thresholds.soil_moisture_min
+                if thresholds.soil_moisture_min is not None
+                else base["soil_moisture_min"]
+            ),
+            "soil_moisture_max": (
+                thresholds.soil_moisture_max
+                if thresholds.soil_moisture_max is not None
+                else base["soil_moisture_max"]
+            ),
+            "updated_at": datetime.utcnow().isoformat(),
+            "updated_by": "api",
+        }
+
+        result = supabase.table("thresholds").update(update_data).eq("id", row_id).execute()
+        row = (result.data or [None])[0] or {}
+        updated_at = row.get("updated_at") or ""
+        return {
+            "message": "Thresholds updated successfully",
+            "data": {
+                "id": row.get("id") or row_id or 0,
+                "temperature_min": update_data["temperature_min"],
+                "temperature_max": update_data["temperature_max"],
+                "soil_moisture_min": update_data["soil_moisture_min"],
+                "soil_moisture_max": update_data["soil_moisture_max"],
+                "updated_at": updated_at,
+            },
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update thresholds: {str(e)}")
 
@@ -95,22 +137,44 @@ def reset_thresholds():
     Reset thresholds to default values.
     """
     try:
-        response = supabase.table("thresholds").select("id").limit(1).execute()
-        
+        _, row = get_active_threshold_payload()
+        if not row:
+            insert_defaults = {
+                "temperature_min": DEFAULT_THRESHOLDS["temperature_min"],
+                "temperature_max": DEFAULT_THRESHOLDS["temperature_max"],
+                "soil_moisture_min": DEFAULT_THRESHOLDS["soil_moisture_min"],
+                "soil_moisture_max": DEFAULT_THRESHOLDS["soil_moisture_max"],
+            }
+            inserted = supabase.table("thresholds").insert(insert_defaults).execute()
+            row = (inserted.data or [None])[0] or {}
+
+        row_id = row.get("id")
+        if not row_id:
+            raise HTTPException(status_code=500, detail="Failed to locate thresholds row")
+
         default_data = {
-            "temperature_min": 0,
-            "temperature_max": 60,
-            "soil_moisture_min": 1,
-            "soil_moisture_max": 100,
+            "temperature_min": DEFAULT_THRESHOLDS["temperature_min"],
+            "temperature_max": DEFAULT_THRESHOLDS["temperature_max"],
+            "soil_moisture_min": DEFAULT_THRESHOLDS["soil_moisture_min"],
+            "soil_moisture_max": DEFAULT_THRESHOLDS["soil_moisture_max"],
+            "updated_at": datetime.utcnow().isoformat(),
+            "updated_by": "system",
         }
-        
-        if response.data and len(response.data) > 0:
-            threshold_id = response.data[0]["id"]
-            result = supabase.table("thresholds").update(default_data).eq("id", threshold_id).execute()
-            return {"message": "Thresholds reset to defaults", "data": result.data[0]}
-        else:
-            result = supabase.table("thresholds").insert(default_data).execute()
-            return {"message": "Default thresholds created", "data": result.data[0]}
+
+        result = supabase.table("thresholds").update(default_data).eq("id", row_id).execute()
+        row = (result.data or [None])[0] or {}
+        updated_at = row.get("updated_at") or ""
+        return {
+            "message": "Thresholds reset to defaults",
+            "data": {
+                "id": row.get("id") or row_id or 0,
+                "temperature_min": default_data["temperature_min"],
+                "temperature_max": default_data["temperature_max"],
+                "soil_moisture_min": default_data["soil_moisture_min"],
+                "soil_moisture_max": default_data["soil_moisture_max"],
+                "updated_at": updated_at,
+            },
+        }
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reset thresholds: {str(e)}")
