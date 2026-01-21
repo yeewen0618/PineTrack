@@ -132,17 +132,14 @@ def _load_sensor_summary(plot_id_for_sensor: int) -> Dict[str, float]:
 
     temp = cleaned_row.get("cleaned_temperature")
     moisture = cleaned_row.get("cleaned_soil_moisture")
-    nitrogen = cleaned_row.get("cleaned_nitrogen")
 
     if temp is None:
         temp = cleaned_row.get("temperature")
     if moisture is None:
         moisture = cleaned_row.get("soil_moisture")
-    if nitrogen is None:
-        nitrogen = cleaned_row.get("nitrogen")
 
     return {
-        "avg_n": float(nitrogen or 0.0),
+        "avg_n": 0.0,
         "avg_moisture": float(moisture or 0.0),
         "avg_temp": float(temp or 0.0),
     }
@@ -424,6 +421,8 @@ def evaluate_status_threshold_core(
     thresholds: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     readings = readings or {}
+    allowed_reading_keys = {"soil_moisture", "temperature"}
+    readings = {k: v for k, v in readings.items() if k in allowed_reading_keys}
     payload_thresholds = thresholds or {}
     reading_meta = None
 
@@ -469,9 +468,6 @@ def evaluate_status_threshold_core(
             "soil_moisture": cleaned_row.get("cleaned_soil_moisture")
             if cleaned_row.get("cleaned_soil_moisture") is not None
             else cleaned_row.get("soil_moisture"),
-            "nitrogen": cleaned_row.get("cleaned_nitrogen")
-            if cleaned_row.get("cleaned_nitrogen") is not None
-            else cleaned_row.get("nitrogen"),
         }
         reading_meta = {
             "plot_id": cleaned_row.get("plot_id", plot_id_for_sensor),
@@ -494,7 +490,6 @@ def evaluate_status_threshold_core(
 
     soil_moisture_val = readings.get("soil_moisture")
     temperature_val = readings.get("temperature")
-    nitrogen_val = readings.get("nitrogen")
 
     soil_moisture_val = (
         float(soil_moisture_val) if soil_moisture_val is not None else None
@@ -502,29 +497,31 @@ def evaluate_status_threshold_core(
     temperature_val = (
         float(temperature_val) if temperature_val is not None else None
     )
-    nitrogen_val = float(nitrogen_val) if nitrogen_val is not None else None
 
     thresholds_used: Dict[str, float] = {}
     thresholds_source = "default"
     threshold_profile_name = None
-    relevant_threshold_keys = {
+    allowed_threshold_keys = {
         "soil_moisture_min",
         "soil_moisture_max",
         "soil_moisture_field_max",
         "temperature_min",
         "temperature_max",
-        "nitrogen_min",
-        "nitrogen_max",
-        "ph_min",
-        "ph_max",
+        "rain_mm_min",
+        "rain_mm_heavy",
+        "waterlogging_hours",
     }
     has_payload_thresholds = any(
         key in payload_thresholds and payload_thresholds[key] is not None
-        for key in relevant_threshold_keys
+        for key in allowed_threshold_keys
     )
 
     if payload_thresholds and has_payload_thresholds:
-        thresholds_used = {k: v for k, v in payload_thresholds.items() if v is not None}
+        thresholds_used = {
+            k: v
+            for k, v in payload_thresholds.items()
+            if k in allowed_threshold_keys and v is not None
+        }
         thresholds_source = "payload"
     else:
         db_thresholds, threshold_row = get_task_eval_thresholds_payload()
@@ -545,10 +542,9 @@ def evaluate_status_threshold_core(
 
     logger.info("Thresholds source=%s thresholds_used=%s", thresholds_source, thresholds_used)
     logger.info(
-        "Sensor values: soil_moisture=%s temperature=%s nitrogen=%s",
+        "Sensor values: soil_moisture=%s temperature=%s",
         soil_moisture_val,
         temperature_val,
-        nitrogen_val,
     )
 
     # 1) Load tasks for that plot + date
@@ -583,8 +579,11 @@ def evaluate_status_threshold_core(
     rain_mm_min = thresholds_used.get("rain_mm_min", 2.0)
     rain_mm_heavy = thresholds_used.get("rain_mm_heavy", 10.0)
 
+    stop_buffer = 10.0
+
     for t in tasks:
-        threshold_reasons: List[str] = []
+        pending_reasons: List[str] = []
+        stop_reasons: List[str] = []
         new_status = "Proceed"
         new_reason = "Proceed (thresholds OK)"
         new_proposed_date = None
@@ -593,66 +592,107 @@ def evaluate_status_threshold_core(
             if (
                 soil_moisture_val is not None
                 and moisture_max is not None
-                and soil_moisture_val > moisture_max
             ):
-                threshold_reasons.append(
-                    f"Soil moisture {soil_moisture_val:.1f}% exceeded configured max {moisture_max:.1f}%"
-                )
+                if soil_moisture_val > moisture_max:
+                    delta = soil_moisture_val - moisture_max
+                    if delta > stop_buffer:
+                        stop_reasons.append(
+                            "Soil moisture "
+                            f"{soil_moisture_val:.1f}% exceeded configured max "
+                            f"{moisture_max:.1f}% by {delta:.1f} (> {stop_buffer:.1f})"
+                        )
+                    else:
+                        pending_reasons.append(
+                            f"Soil moisture {soil_moisture_val:.1f}% exceeded configured max "
+                            f"{moisture_max:.1f}%"
+                        )
 
         if t["type"] in ["weeding", "land-prep", "fertilization"]:
             if (
                 soil_moisture_val is not None
                 and moisture_field_max is not None
-                and soil_moisture_val > moisture_field_max
             ):
-                threshold_reasons.append(
-                    f"Soil moisture {soil_moisture_val:.1f}% exceeded configured field max {moisture_field_max:.1f}%"
-                )
+                if soil_moisture_val > moisture_field_max:
+                    delta = soil_moisture_val - moisture_field_max
+                    if delta > stop_buffer:
+                        stop_reasons.append(
+                            "Soil moisture "
+                            f"{soil_moisture_val:.1f}% exceeded configured field max "
+                            f"{moisture_field_max:.1f}% by {delta:.1f} (> {stop_buffer:.1f})"
+                        )
+                    else:
+                        pending_reasons.append(
+                            "Soil moisture "
+                            f"{soil_moisture_val:.1f}% exceeded configured field max "
+                            f"{moisture_field_max:.1f}%"
+                        )
 
         if (
             temperature_val is not None
             and temperature_max is not None
-            and temperature_val > temperature_max
         ):
-            threshold_reasons.append(
-                f"Temperature {temperature_val:.1f}C exceeded configured max {temperature_max:.1f}C"
-            )
+            if temperature_val > temperature_max:
+                delta = temperature_val - temperature_max
+                if delta > stop_buffer:
+                    stop_reasons.append(
+                        "Temperature "
+                        f"{temperature_val:.1f}C exceeded configured max "
+                        f"{temperature_max:.1f}C by {delta:.1f} (> {stop_buffer:.1f})"
+                    )
+                else:
+                    pending_reasons.append(
+                        f"Temperature {temperature_val:.1f}C exceeded configured max "
+                        f"{temperature_max:.1f}C"
+                    )
 
         if (
             temperature_val is not None
             and temperature_min is not None
-            and temperature_val < temperature_min
         ):
-            threshold_reasons.append(
-                f"Temperature {temperature_val:.1f}C below configured min {temperature_min:.1f}C"
-            )
+            if temperature_val < temperature_min:
+                delta = temperature_min - temperature_val
+                if delta > stop_buffer:
+                    stop_reasons.append(
+                        "Temperature "
+                        f"{temperature_val:.1f}C below configured min "
+                        f"{temperature_min:.1f}C by {delta:.1f} (> {stop_buffer:.1f})"
+                    )
+                else:
+                    pending_reasons.append(
+                        f"Temperature {temperature_val:.1f}C below configured min "
+                        f"{temperature_min:.1f}C"
+                    )
 
-        if threshold_reasons:
+        if stop_reasons or pending_reasons:
             profile_suffix = (
                 f" (threshold profile: {threshold_profile_name})"
                 if threshold_profile_name
                 else ""
             )
-            new_status = "Pending"
-            reason_detail = " | ".join(threshold_reasons)
-            proposed_date, reschedule_reason = _find_next_safe_date(
-                target_date=target_date,
-                reschedule_days=reschedule_days,
-                max_lookahead_days=MAX_LOOKAHEAD_DAYS,
-                weather_calendar=weather_calendar,
-                rain_mm_min=float(rain_mm_min),
-                rain_mm_heavy=float(rain_mm_heavy),
-                task_title=t.get("title") or "",
-            )
-            new_reason = (
-                f"Pending: {reason_detail}{profile_suffix}. {reschedule_reason}"
-            )
-            new_proposed_date = proposed_date.isoformat()
+            if stop_reasons:
+                new_status = "Stop"
+                reason_detail = " | ".join(stop_reasons)
+                new_reason = f"Stop: {reason_detail}{profile_suffix}."
+            else:
+                new_status = "Pending"
+                reason_detail = " | ".join(pending_reasons)
+                proposed_date, reschedule_reason = _find_next_safe_date(
+                    target_date=target_date,
+                    reschedule_days=reschedule_days,
+                    max_lookahead_days=MAX_LOOKAHEAD_DAYS,
+                    weather_calendar=weather_calendar,
+                    rain_mm_min=float(rain_mm_min),
+                    rain_mm_heavy=float(rain_mm_heavy),
+                    task_title=t.get("title") or "",
+                )
+                new_reason = (
+                    f"Pending: {reason_detail}{profile_suffix}. {reschedule_reason}"
+                )
+                new_proposed_date = proposed_date.isoformat()
 
         features = {
             "soil_moisture": float(soil_moisture_val if soil_moisture_val is not None else 0.0),
             "temperature": float(temperature_val if temperature_val is not None else 0.0),
-            "nitrogen": float(nitrogen_val if nitrogen_val is not None else 0.0),
             "rain_today": rain_today,
             "rain_next_3d": rain_next_3d,
             "task_type": str(t.get("type") or "").lower(),
@@ -672,6 +712,12 @@ def evaluate_status_threshold_core(
                 new_reason = _merge_reason(new_reason, f"AI predicted Stop (conf {ai_conf:.2f})")
 
         # Save update if changed
+        logger.info(
+            "Task %s decision=%s proposed_date=%s",
+            t.get("id"),
+            new_status,
+            new_proposed_date,
+        )
         updates.append((t["id"], new_status, new_reason, new_proposed_date))
 
     # 3) Apply updates to DB

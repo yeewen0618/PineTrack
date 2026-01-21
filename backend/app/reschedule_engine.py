@@ -133,7 +133,6 @@ def suggest_date_for_task(
 
     soil_moisture = _get_sensor_value(sensor_summary, "avg_moisture")
     temperature = _get_sensor_value(sensor_summary, "avg_temp")
-    nitrogen = _get_sensor_value(sensor_summary, "avg_n")
 
     base_str = base_date.isoformat()
     rain_today = float(weather_calendar.get(base_str, 0.0) or 0.0)
@@ -145,7 +144,6 @@ def suggest_date_for_task(
     features = {
         "soil_moisture": soil_moisture,
         "temperature": temperature,
-        "nitrogen": nitrogen,
         "rain_today": rain_today,
         "rain_next_3d": rain_next_3d,
         "task_type": str(task.get("type") or "").lower(),

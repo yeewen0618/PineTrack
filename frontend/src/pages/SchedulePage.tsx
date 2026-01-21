@@ -24,6 +24,7 @@ import { listPlots, listTasks } from '../lib/api';
 import type { Plot } from '../lib/api';
 
 type ViewMode = "month" | "week" | "day";
+type DominantStatus = "pending" | "stop" | "none";
 
 type ScheduleTaskVM = {
   id: string;
@@ -35,6 +36,7 @@ type ScheduleTaskVM = {
   description?: string | null;
   assignedWorker?: string | null;
   reason?: string | null;
+  updatedAt?: string | null;
 };
 
 export function SchedulePage() {
@@ -77,18 +79,33 @@ export function SchedulePage() {
       year: 'numeric',
     });
 
-  const getTaskContainerClasses = (task: ScheduleTaskVM) => {
+  const getTaskContainerClasses = (
+    task: ScheduleTaskVM,
+    dominantStatus: DominantStatus = "none",
+  ) => {
     if (isPastDate(task.date)) return 'bg-gray-100 border border-gray-200 opacity-80';
+    if (dominantStatus === 'pending') {
+      return 'bg-amber-100 border border-amber-400 hover:bg-amber-200';
+    }
+    if (dominantStatus === 'stop') {
+      return 'bg-rose-100 border border-rose-500 hover:bg-rose-200';
+    }
     if (task.status === 'Proceed') return 'bg-green-100 border border-green-200';
-    if (task.status === 'Pending') return 'bg-amber-100 border border-amber-200';
-    return 'bg-red-100 border border-red-200';
+    if (task.status === 'Pending') return 'bg-amber-100 border border-amber-400';
+    return 'bg-rose-100 border border-rose-500';
   };
 
-  const getTaskTextColor = (task: ScheduleTaskVM, tone: 'primary' | 'secondary' = 'primary') => {
+  const getTaskTextColor = (
+    task: ScheduleTaskVM,
+    tone: 'primary' | 'secondary' = 'primary',
+    dominantStatus: DominantStatus = "none",
+  ) => {
     if (isPastDate(task.date)) return 'text-gray-500';
+    if (dominantStatus === 'pending') return tone === 'primary' ? 'text-amber-900' : 'text-amber-800';
+    if (dominantStatus === 'stop') return tone === 'primary' ? 'text-rose-900' : 'text-rose-800';
     if (task.status === 'Proceed') return tone === 'primary' ? 'text-green-800' : 'text-green-700';
-    if (task.status === 'Pending') return tone === 'primary' ? 'text-amber-800' : 'text-amber-700';
-    return tone === 'primary' ? 'text-red-800' : 'text-red-700';
+    if (task.status === 'Pending') return tone === 'primary' ? 'text-amber-900' : 'text-amber-800';
+    return tone === 'primary' ? 'text-rose-900' : 'text-rose-800';
   };
 
   const getTaskStatusLabel = (task: ScheduleTaskVM) => {
@@ -104,15 +121,64 @@ export function SchedulePage() {
     return null;
   };
 
-  const getDayCellBackground = (dayTasks: ScheduleTaskVM[], isTodayCell: boolean) => {
+  const getTaskPriority = (task: ScheduleTaskVM) => {
+    if (isPastDate(task.date)) return 3;
+    if (task.status === 'Stop') return 0;
+    if (task.status === 'Pending') return 1;
+    return 2;
+  };
+
+  const getPrimaryTask = (dayTasks: ScheduleTaskVM[], statusFilter: string) => {
+    if (dayTasks.length === 0) return null;
+    if (statusFilter !== 'all') return dayTasks[0];
+
+    const sorted = dayTasks
+      .map((task, index) => ({ task, index }))
+      .sort((a, b) => {
+        const priorityA = getTaskPriority(a.task);
+        const priorityB = getTaskPriority(b.task);
+        if (priorityA !== priorityB) return priorityA - priorityB;
+
+        const timeA = a.task.updatedAt ? Date.parse(a.task.updatedAt) : NaN;
+        const timeB = b.task.updatedAt ? Date.parse(b.task.updatedAt) : NaN;
+        if (!Number.isNaN(timeA) && !Number.isNaN(timeB) && timeA !== timeB) {
+          return timeB - timeA;
+        }
+        return a.index - b.index;
+      });
+
+    return sorted[0]?.task ?? null;
+  };
+
+  const getDominantStatus = (dayTasks: ScheduleTaskVM[], statusFilter: string): DominantStatus => {
+    if (statusFilter !== 'all') return 'none';
+    const activeTasks = dayTasks.filter((task) => !isPastDate(task.date));
+    if (activeTasks.some((task) => task.status === 'Stop')) return 'stop';
+    if (activeTasks.some((task) => task.status === 'Pending')) return 'pending';
+    return 'none';
+  };
+
+  const getDayCellBackground = (
+    dayTasks: ScheduleTaskVM[],
+    isTodayCell: boolean,
+    dominantStatus: DominantStatus,
+  ) => {
     const activeTasks = dayTasks.filter((task) => !isPastDate(task.date));
     const hasStop = activeTasks.some((task) => task.status === 'Stop');
     const hasPending = activeTasks.some((task) => task.status === 'Pending');
 
-    if (hasStop) return 'bg-red-50';
-    if (hasPending) return 'bg-amber-50';
-    return isTodayCell ? 'bg-slate-50' : 'bg-white';
+    if (dominantStatus === 'stop') {
+      return 'bg-rose-100 border-rose-500';
+    }
+    if (dominantStatus === 'pending') {
+      return 'bg-amber-50 border-amber-400';
+    }
+    if (hasStop) return 'bg-rose-50 border-rose-300';
+    if (hasPending) return 'bg-amber-50 border-amber-300';
+    return isTodayCell ? 'bg-slate-50 border-slate-200' : 'bg-white border-gray-200';
   };
+
+  const getCountBadgeClasses = () => 'bg-[#111827] border-[#111827] text-white';
 
   const renderTaskStatusBadge = (task: ScheduleTaskVM) => {
     const StatusIcon = getTaskStatusIcon(task);
@@ -151,6 +217,7 @@ export function SchedulePage() {
         description?: string | null;
         assigned_worker_name?: string | null;
         reason?: string | null;
+        updated_at?: string | null;
       }) => ({
         id: t.id,
         title: t.title,
@@ -161,6 +228,7 @@ export function SchedulePage() {
         description: t.description ?? null,
         assignedWorker: t.assigned_worker_name ?? null,
         reason: t.reason ?? null,
+        updatedAt: t.updated_at ?? null,
       }));
 
       setTasks(vm);
@@ -456,13 +524,17 @@ export function SchedulePage() {
                 const dayTasks = getTasksForDay(d);
                 const maxVisible = 1;
                 const isToday = isSameDay(new Date(year, month, d), today);
-                const dayBackground = getDayCellBackground(dayTasks, isToday);
+                const dominantStatus = getDominantStatus(dayTasks, filterStatus);
+                const dayBackground = getDayCellBackground(dayTasks, isToday, dominantStatus);
                 const showTodayBadge = isToday && dayTasks.length <= maxVisible;
+                const showCountBadge = dayTasks.length > maxVisible;
+                const primaryTask = getPrimaryTask(dayTasks, filterStatus);
+                const previewTasks = primaryTask ? [primaryTask] : [];
 
                 return (
                   <div
                     key={d}
-                    className={`h-[84px] border border-gray-200 rounded-xl p-2 relative cursor-pointer ${dayBackground} ${isToday ? 'ring-2 ring-blue-300' : ''}`}
+                    className={`h-[84px] border rounded-xl p-2 relative cursor-pointer ${dayBackground} ${isToday ? 'ring-2 ring-blue-300' : ''}`}
                     onClick={() => setSelectedDate(dateStr)}
                     role="button"
                     tabIndex={0}
@@ -472,15 +544,24 @@ export function SchedulePage() {
                   >
                     <div className="flex items-center justify-between">
                       <div className="text-[14px] text-[#111827]">{d}</div>
-                      {showTodayBadge && (
-                        <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
-                          Today
-                        </span>
+                      {(showTodayBadge || showCountBadge) && (
+                        <div className="flex items-center gap-1">
+                          {showTodayBadge && (
+                            <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
+                              Today
+                            </span>
+                          )}
+                          {showCountBadge && (
+                            <Badge className={`text-[11px] rounded-full px-2 border ${getCountBadgeClasses()}`}>
+                              {dayTasks.length}
+                            </Badge>
+                          )}
+                        </div>
                       )}
                     </div>
 
                     <div className="mt-1 space-y-1">
-                      {dayTasks.slice(0, maxVisible).map((task) => {
+                      {previewTasks.map((task) => {
                         const isPastTask = isPastDate(task.date);
                         const StatusIcon = getTaskStatusIcon(task);
 
@@ -489,7 +570,7 @@ export function SchedulePage() {
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <div
-                                  className={`text-[12px] px-2 py-1 rounded-lg ${getTaskContainerClasses(task)} ${getTaskTextColor(task)} ${isPastTask ? 'cursor-default' : 'cursor-pointer'}`}
+                                  className={`text-[12px] px-2 py-1 rounded-lg ${getTaskContainerClasses(task, dominantStatus)} ${getTaskTextColor(task, 'primary', dominantStatus)} ${isPastTask ? 'cursor-default' : 'cursor-pointer'}`}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     if (!isPastTask) setSelectedTask(task);
@@ -502,7 +583,7 @@ export function SchedulePage() {
                                       {isPastTask ? `Done: ${task.title}` : task.title}
                                     </span>
                                   </p>
-                                  <p className={`text-[10px] truncate ${getTaskTextColor(task, 'secondary')}`}>
+                                  <p className={`text-[10px] truncate ${getTaskTextColor(task, 'secondary', dominantStatus)}`}>
                                     {task.assignedWorker ?? 'Unassigned'}
                                   </p>
                                 </div>
@@ -520,11 +601,6 @@ export function SchedulePage() {
                         );
                       })}
 
-                      {dayTasks.length > maxVisible && (
-                        <Badge className="absolute top-2 right-2 bg-[#111827] text-white text-[11px] rounded-full px-2">
-                          {dayTasks.length}
-                        </Badge>
-                      )}
                     </div>
                   </div>
                 );
@@ -564,13 +640,17 @@ export function SchedulePage() {
                 return weekOrdered.map((dayData) => {
                   const dayTasks = dayData.tasks ?? [];
                   const isToday = isSameDay(parseDateString(dayData.date), today);
-                  const dayBackground = getDayCellBackground(dayTasks, isToday);
+                  const dominantStatus = getDominantStatus(dayTasks, filterStatus);
+                  const dayBackground = getDayCellBackground(dayTasks, isToday, dominantStatus);
                   const showTodayBadge = isToday && dayTasks.length <= maxVisible;
+                  const showCountBadge = dayTasks.length > maxVisible;
+                  const primaryTask = getPrimaryTask(dayTasks, filterStatus);
+                  const previewTasks = primaryTask ? [primaryTask] : [];
 
                   return (
                     <div
                       key={dayData.date}
-                      className={`h-[84px] border border-gray-200 rounded-xl p-2 relative cursor-pointer ${dayBackground} ${isToday ? 'ring-2 ring-blue-300' : ''}`}
+                      className={`h-[84px] border rounded-xl p-2 relative cursor-pointer ${dayBackground} ${isToday ? 'ring-2 ring-blue-300' : ''}`}
                       onClick={() => setSelectedDate(dayData.date)}
                       role="button"
                       tabIndex={0}
@@ -581,43 +661,52 @@ export function SchedulePage() {
                       {/* Day number (same style as month view) */}
                       <div className="flex items-center justify-between">
                         <div className="text-[14px] text-[#111827]">{dayData.dayNumber}</div>
-                        {showTodayBadge && (
-                          <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
-                            Today
-                          </span>
+                        {(showTodayBadge || showCountBadge) && (
+                          <div className="flex items-center gap-1">
+                            {showTodayBadge && (
+                              <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
+                                Today
+                              </span>
+                            )}
+                            {showCountBadge && (
+                              <Badge className={`text-[11px] rounded-full px-2 border ${getCountBadgeClasses()}`}>
+                                {dayTasks.length}
+                              </Badge>
+                            )}
+                          </div>
                         )}
                       </div>
 
                       <div className="mt-1 space-y-1">
-                        {dayTasks.slice(0, maxVisible).map((task) => {
+                        {previewTasks.map((task) => {
                           const isPastTask = isPastDate(task.date);
                           const StatusIcon = getTaskStatusIcon(task);
 
                           return (
                             <TooltipProvider key={task.id}>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div
-                                    className={`text-[12px] px-2 py-1 rounded-lg ${getTaskContainerClasses(task)} ${getTaskTextColor(task)} ${isPastTask ? 'cursor-default' : 'cursor-pointer'}`}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (!isPastTask) setSelectedTask(task);
-                                    }}
-                                    aria-disabled={isPastTask}
-                                  >
-                                    <p className="flex items-center gap-1 min-w-0">
-                                      {StatusIcon && <StatusIcon size={12} className="text-current" aria-hidden="true" />}
-                                      <span className="truncate">
-                                        {isPastTask ? `Done: ${task.title}` : task.title}
-                                      </span>
-                                    </p>
-                                    <p className={`text-[10px] truncate ${getTaskTextColor(task, 'secondary')}`}>
-                                      {task.assignedWorker ?? 'Unassigned'}
-                                    </p>
-                                  </div>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-[220px]">
-                                  <p className="font-medium">{task.title}</p>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div
+                                  className={`text-[12px] px-2 py-1 rounded-lg ${getTaskContainerClasses(task, dominantStatus)} ${getTaskTextColor(task, 'primary', dominantStatus)} ${isPastTask ? 'cursor-default' : 'cursor-pointer'}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!isPastTask) setSelectedTask(task);
+                                  }}
+                                  aria-disabled={isPastTask}
+                                >
+                                  <p className="flex items-center gap-1 min-w-0">
+                                    {StatusIcon && <StatusIcon size={12} className="text-current" aria-hidden="true" />}
+                                    <span className="truncate">
+                                      {isPastTask ? `Done: ${task.title}` : task.title}
+                                    </span>
+                                  </p>
+                                  <p className={`text-[10px] truncate ${getTaskTextColor(task, 'secondary', dominantStatus)}`}>
+                                    {task.assignedWorker ?? 'Unassigned'}
+                                  </p>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-[220px]">
+                                <p className="font-medium">{task.title}</p>
                                   <p className="text-xs text-[#6B7280]">{task.plotName} ??? {task.date}</p>
                                   <p className="text-xs text-[#6B7280]">Worker: {task.assignedWorker ?? 'Unassigned'}</p>
                                   {isPastTask && (
@@ -629,11 +718,6 @@ export function SchedulePage() {
                           );
                         })}
 
-                        {dayTasks.length > maxVisible && (
-                          <Badge className="absolute top-2 right-2 bg-[#111827] text-white text-[11px] rounded-full px-2">
-                            {dayTasks.length}
-                          </Badge>
-                        )}
                       </div>
                     </div>
                   );
