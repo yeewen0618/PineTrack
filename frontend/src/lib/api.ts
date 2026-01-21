@@ -18,26 +18,36 @@ export async function getWeatherRescheduleSuggestions(
 }
 // src/lib/api.ts
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
+const API_BASE =
+  import.meta.env.VITE_API_URL ??
+  import.meta.env.VITE_API_BASE ??
+  "http://127.0.0.1:5001";
+
+type ApiFetchOptions = RequestInit & {
+  skipAuthRedirect?: boolean;
+};
 
 export async function apiFetch<T>(
   path: string,
-  options: RequestInit = {},
+  options: ApiFetchOptions = {},
 ): Promise<T> {
+  const { skipAuthRedirect, ...fetchOptions } = options;
   const token = sessionStorage.getItem("access_token");
 
   const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
+    ...fetchOptions,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers ?? {}),
+      ...(fetchOptions.headers ?? {}),
     },
   });
 
   if (res.status === 401) {
     sessionStorage.removeItem("access_token");
-    window.location.href = "/login";
+    if (!skipAuthRedirect && window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
   }
 
 
@@ -53,9 +63,10 @@ export async function apiFetch<T>(
 }
 
 export async function login(username: string, password: string) {
-  return apiFetch<{ access_token: string; token_type: string }>("/auth/login", {
+  return apiFetch<{ access_token: string; token_type: string; user?: User }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
+    skipAuthRedirect: true,
   });
 }
 
@@ -104,11 +115,40 @@ export type Task = {
   // ✅ frontend single-truth field (mapped from backend "status")
   decision: PlotStatus;
 
+  assigned_worker_id?: string | null;
+  assigned_worker_name?: string | null;
   description?: string | null;
   original_date?: string | null;
   proposed_date?: string | null;
   reason?: string | null;
 };
+export type Worker = {
+  id: string;
+  name: string;
+  role?: string | null;
+  tasks_completed?: number | null;
+  contact?: string | null;
+  avatar_url?: string | null;
+  is_active?: boolean | null;
+  created_at?: string | null;
+};
+
+export type User = {
+  id: number;
+  username: string;
+  email?: string | null;
+  full_name?: string | null;
+  role?: string | null;
+  created_at?: string | null;
+};
+
+function normalizeWorker(worker: Worker): Worker {
+  const rawId = worker?.id;
+  return {
+    ...worker,
+    id: rawId == null ? "" : String(rawId),
+  } as Worker;
+}
 
 // ---------- Plots ----------
 export async function listPlots() {
@@ -142,6 +182,21 @@ export async function createPlotWithPlan(payload: {
   );
 }
 
+export async function updatePlot(
+  plotId: string,
+  payload: {
+    name?: string;
+    area_ha?: number;
+    crop_type?: string;
+    planting_date?: string; // YYYY-MM-DD
+  },
+) {
+  return apiFetch<{ ok: true; data: Plot }>(`/api/plots/${plotId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 /**
  * ✅ Helper: always get ONE plot by id using the same source
  * (later we can switch to a dedicated backend endpoint without changing pages)
@@ -172,6 +227,89 @@ export async function listTasks(params?: { plot_id?: string }) {
 export async function getTasksByPlotId(plotId: string): Promise<Task[]> {
   const res = await listTasks({ plot_id: plotId });
   return res.data;
+}
+
+export async function updateTaskAssignment(payload: {
+  task_id: string;
+  assigned_worker_id: string | null;
+  assigned_worker_name: string | null;
+}) {
+  const res = await apiFetch<{ ok: true; data: RawBackendTask }>(
+    `/api/tasks/${encodeURIComponent(payload.task_id)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        assigned_worker_id: payload.assigned_worker_id,
+        assigned_worker_name: payload.assigned_worker_name,
+      }),
+    },
+  );
+
+  return {
+    ...res,
+    data: {
+      ...res.data,
+      decision: res.data.status as PlotStatus,
+    } as Task,
+  };
+}
+
+// ---------- Workers ----------
+export async function listWorkers() {
+  const res = await apiFetch<{ ok: true; data: Worker[] }>("/api/workers");
+  const normalized = (res.data ?? []).map((worker) => normalizeWorker(worker));
+
+  return { ...res, data: normalized };
+}
+
+export async function updateWorker(
+  workerId: string,
+  payload: { name?: string; role?: string | null; contact?: string | null; is_active?: boolean | null },
+) {
+  const res = await apiFetch<{ ok: true; data: Worker }>(
+    `/api/workers/${encodeURIComponent(workerId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+  );
+  return { ...res, data: normalizeWorker(res.data) };
+}
+
+export async function deleteWorker(workerId: string) {
+  return apiFetch<{ ok: true; deleted_worker_id: string }>(
+    `/api/workers/${encodeURIComponent(workerId)}`,
+    { method: "DELETE" },
+  );
+}
+
+// ---------- Users ----------
+export async function getCurrentUser() {
+  const res = await apiFetch<{ ok?: boolean; data?: User } | User>("/auth/me");
+  if ("data" in res && res.data) return res.data;
+  return res as User;
+}
+
+export async function updateUserProfile(
+  userId: string | number,
+  payload: { full_name?: string; email?: string | null },
+) {
+  const res = await apiFetch<{ ok?: boolean; data?: User } | User>(`/api/users/${encodeURIComponent(String(userId))}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  if ("data" in res && res.data) return res.data;
+  return res as User;
+}
+
+export async function changePassword(payload: {
+  current_password: string;
+  new_password: string;
+}) {
+  return apiFetch<{ ok: boolean; message?: string }>("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 // ---------- Reschedule Center ----------
@@ -263,8 +401,9 @@ export async function getAnalyticsForecast(days: number = 7, plotId?: string) {
   return res.json();
 }
 
-export async function getWeatherAnalytics() {
-  const res = await fetch(`${API_BASE}/analytics/weather`, {
+export async function getWeatherAnalytics(plotId?: string) {
+  const plotQuery = plotId ? `?plot_id=${encodeURIComponent(plotId)}` : "";
+  const res = await fetch(`${API_BASE}/analytics/weather${plotQuery}`, {
       method: "GET",
       headers: { "Content-Type": "application/json" }
   });
@@ -292,6 +431,44 @@ export interface Thresholds {
   soil_moisture_max: number;
   updated_at: string;
 }
+
+export interface TaskEvalThresholds {
+  id: string;
+  name?: string | null;
+  is_active: boolean;
+  soil_moisture_min: number;
+  soil_moisture_max: number;
+  temperature_min: number;
+  temperature_max: number;
+  rain_mm_min: number;
+  rain_mm_heavy: number;
+  waterlogging_hours: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export type TaskEvalThresholdUpdate = Omit<
+  TaskEvalThresholds,
+  "id" | "name" | "is_active" | "created_at" | "updated_at"
+>;
+
+export type EvaluateStatusThresholdPayload = {
+  plot_id: string;
+  date: string;
+  device_id?: number;
+  reschedule_days?: number;
+  thresholds?: Record<string, number>;
+  readings?: Record<string, number>;
+};
+
+export type EvaluateStatusThresholdResponse = {
+  message: string;
+  plot_id: string;
+  date: string;
+  updated: number;
+  reading_device_id?: number | null;
+  reading_timestamp?: string | null;
+};
 
 export async function getThresholds(): Promise<Thresholds> {
   const res = await fetch(`${API_BASE}/config/thresholds`, {
@@ -322,4 +499,32 @@ export async function resetThresholds() {
   
   if (!res.ok) throw new Error("Failed to reset thresholds");
   return res.json();
+}
+
+export async function getTaskEvalThresholds(): Promise<TaskEvalThresholds> {
+  const res = await fetch(`${API_BASE}/api/config/task-eval-thresholds`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" }
+  });
+
+  if (!res.ok) throw new Error("Failed to fetch task evaluation thresholds");
+  return res.json();
+}
+
+export async function updateTaskEvalThresholds(data: TaskEvalThresholdUpdate) {
+  const res = await fetch(`${API_BASE}/api/config/task-eval-thresholds`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+
+  if (!res.ok) throw new Error("Failed to update task evaluation thresholds");
+  return res.json();
+}
+
+export async function evaluateStatusThreshold(payload: EvaluateStatusThresholdPayload) {
+  return apiFetch<EvaluateStatusThresholdResponse>("/api/schedule/evaluate-status-threshold", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

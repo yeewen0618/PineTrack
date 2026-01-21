@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import os
 from app.core.supabase_client import supabase
+from app.services.threshold_service import DEFAULT_THRESHOLDS, get_active_thresholds
 
 # --- SECTION 1: CONFIGURATION ---
 # Using the supabase client from app.core.supabase_client which is already configured
@@ -12,19 +13,14 @@ def get_thresholds():
     Returns default values if table is empty or error occurs.
     """
     try:
-        response = supabase.table("thresholds").select("*").limit(1).execute()
-        if response.data and len(response.data) > 0:
-            return response.data[0]
+        thresholds = get_active_thresholds()
+        if thresholds:
+            return {**DEFAULT_THRESHOLDS, **thresholds}
     except Exception as e:
         print(f"Warning: Could not fetch thresholds from database: {e}")
     
     # Return defaults
-    return {
-        "temperature_min": 0,
-        "temperature_max": 60,
-        "soil_moisture_min": 1,
-        "soil_moisture_max": 100
-    }
+    return DEFAULT_THRESHOLDS.copy()
 
 def data_processing_pipeline(plot_id=None):
     """

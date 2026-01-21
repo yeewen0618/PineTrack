@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -12,15 +12,20 @@ import {
   DialogTitle,
   DialogTrigger
 } from '../components/ui/dialog';
-import { mockWorkers, mockPlots, mockTasks } from '../lib/mockData';
 import { Plus, Search, Phone, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useEffect } from "react";
-import { apiFetch } from "../lib/api";
+import { listPlots, listTasks, listWorkers } from "../lib/api";
+import type { Plot, Task, Worker } from "../lib/api";
+import { WorkerManageDialog } from "../components/workers/WorkerManageDialog";
 
 export function WorkersPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [plots, setPlots] = useState<Plot[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedWorker, setSelectedWorker] = useState<Worker | null>(null);
+  const [manageDialogOpen, setManageDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     role: 'Field Worker',
@@ -28,21 +33,70 @@ export function WorkersPage() {
   });
 
   useEffect(() => {
-    apiFetch<{ status: string; rows: any[] }>("/api/db-test")
-      .then((data) => {
-        console.log("DB TEST RESULT:", data);
-      })
-      .catch((err) => {
-        console.error("DB TEST ERROR:", err.message);
-      });
+    const load = async () => {
+      // Load workers, plots, and tasks from the backend (no mock data).
+      try {
+        const [workersRes, plotsRes, tasksRes] = await Promise.all([
+          listWorkers(),
+          listPlots(),
+          listTasks(),
+        ]);
+        setWorkers(workersRes.data ?? []);
+        setPlots(plotsRes.data ?? []);
+        setTasks(tasksRes.data ?? []);
+      } catch (err: Error | unknown) {
+        toast.error(err instanceof Error ? err.message : "Failed to load workers data");
+      } finally {
+        // no-op: keep rendering current data
+      }
+    };
+
+    load();
   }, [])
 
-  // Fix: Ensure mockWorkers is always an array
-  const filteredWorkers = Array.isArray(mockWorkers)
-    ? mockWorkers.filter((worker) =>
-      worker.name.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-    : [];
+  const filteredWorkers = workers.filter((worker) =>
+    worker.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const todayStr = useMemo(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }, []);
+
+  const tasksByWorker = useMemo(() => {
+    const map = new Map<string, Task[]>();
+    for (const task of tasks) {
+      const workerId = task.assigned_worker_id ?? '';
+      if (!workerId) continue;
+      const bucket = map.get(workerId) ?? [];
+      bucket.push(task);
+      map.set(workerId, bucket);
+    }
+    return map;
+  }, [tasks]);
+
+  const plotsById = useMemo(() => {
+    return new Map(plots.map((plot) => [plot.id, plot]));
+  }, [plots]);
+
+  const handleWorkerUpdated = (updatedWorker: Worker) => {
+    setWorkers((prev) =>
+      prev.map((worker) => (worker.id === updatedWorker.id ? updatedWorker : worker)),
+    );
+    setSelectedWorker(updatedWorker);
+  };
+
+  const handleWorkerDeleted = (workerId: string) => {
+    setWorkers((prev) => prev.filter((worker) => worker.id !== workerId));
+    setSelectedWorker(null);
+  };
+
+  const handleTaskUpdated = (updatedTask: Task) => {
+    setTasks((prev) => prev.map((task) => (task.id === updatedTask.id ? updatedTask : task)));
+  };
 
   const handleAddWorker = (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,16 +198,18 @@ export function WorkersPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="p-5 rounded-2xl bg-white">
           <p className="text-sm text-[#6B7280] mb-1">Total Workers</p>
-          <p className="text-2xl text-[#111827]">{mockWorkers.length}</p>
+          <p className="text-2xl text-[#111827]">{workers.length}</p>
         </Card>
         <Card className="p-5 rounded-2xl bg-white">
           <p className="text-sm text-[#6B7280] mb-1">Active Today</p>
-          <p className="text-2xl text-[#111827]">{mockWorkers.length}</p>
+          <p className="text-2xl text-[#111827]">
+            {workers.filter((worker) => worker.is_active).length}
+          </p>
         </Card>
         <Card className="p-5 rounded-2xl bg-white">
           <p className="text-sm text-[#6B7280] mb-1">Tasks Completed</p>
           <p className="text-2xl text-[#111827]">
-            {mockWorkers.reduce((sum, w) => sum + w.tasksCompleted, 0)}
+            {workers.reduce((sum, worker) => sum + (worker.tasks_completed ?? 0), 0)}
           </p>
         </Card>
         <Card className="p-5 rounded-2xl bg-white">
@@ -179,36 +235,53 @@ export function WorkersPage() {
       {/* Workers Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredWorkers.map((worker) => {
-          const workerTasks = mockTasks.filter((task) =>
-            worker.assignedPlots.includes(task.plotId)
+          const workerTasks = tasksByWorker.get(worker.id) ?? [];
+          const todayTasks = workerTasks.filter((task) => task.task_date === todayStr);
+          const assignedPlotIds = Array.from(
+            new Set(workerTasks.map((task) => task.plot_id))
           );
-          const todayTasks = workerTasks.filter((task) => task.date === '2025-11-06');
 
           return (
-            <Card key={worker.id} className="p-6 rounded-2xl bg-white hover:shadow-lg transition-shadow">
+            <Card
+              key={worker.id}
+              className="p-6 rounded-2xl bg-white border border-transparent hover:border-[#BBF7D0] hover:shadow-lg transition-all cursor-pointer"
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                setSelectedWorker(worker);
+                setManageDialogOpen(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  setSelectedWorker(worker);
+                  setManageDialogOpen(true);
+                }
+              }}
+              aria-label={`Manage ${worker.name}`}
+            >
               {/* Worker Header */}
               <div className="flex items-start gap-4 mb-4">
                 <Avatar>
-                  <AvatarImage src={worker.avatarUrl || undefined} alt={worker.name} />
+                  <AvatarImage src={worker.avatar_url || undefined} alt={worker.name} />
                   <AvatarFallback>{getWorkerInitials(worker.name)}</AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-[#111827] truncate">{worker.name}</h3>
-                  <p className="text-sm text-[#6B7280]">{worker.role}</p>
+                  <p className="text-sm text-[#6B7280]">{worker.role ?? 'Field Worker'}</p>
                 </div>
               </div>
 
               {/* Contact */}
               <div className="flex items-center gap-2 text-sm text-[#6B7280] mb-4">
                 <Phone size={14} />
-                <span>{worker.contact}</span>
+                <span>{worker.contact ?? '—'}</span>
               </div>
 
               {/* Stats */}
               <div className="grid grid-cols-2 gap-4 mb-4 pb-4 border-b border-[#E5E7EB]">
                 <div>
                   <p className="text-xs text-[#6B7280] mb-1">Assigned Plots</p>
-                  <p className="text-lg text-[#111827]">{worker.assignedPlots.length}</p>
+                  <p className="text-lg text-[#111827]">{assignedPlotIds.length}</p>
                 </div>
                 <div>
                   <p className="text-xs text-[#6B7280] mb-1">Tasks Today</p>
@@ -220,8 +293,8 @@ export function WorkersPage() {
               <div className="mb-4">
                 <p className="text-xs text-[#6B7280] mb-2">Assigned Plots:</p>
                 <div className="flex flex-wrap gap-2">
-                  {worker.assignedPlots.map((plotId) => {
-                    const plot = mockPlots.find((p) => p.id === plotId);
+                  {assignedPlotIds.map((plotId) => {
+                    const plot = plotsById.get(plotId);
                     return plot ? (
                       <span
                         key={plotId}
@@ -240,7 +313,7 @@ export function WorkersPage() {
                   <p className="text-xs text-[#6B7280]">Tasks Completed</p>
                   <div className="flex items-center gap-1 text-[#16A34A]">
                     <CheckCircle2 size={14} />
-                    <span className="text-xs">{worker.tasksCompleted}</span>
+                    <span className="text-xs">{worker.tasks_completed ?? 0}</span>
                   </div>
                 </div>
                 <div className="w-full h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
@@ -258,6 +331,20 @@ export function WorkersPage() {
           );
         })}
       </div>
+
+      <WorkerManageDialog
+        worker={selectedWorker}
+        open={manageDialogOpen}
+        onOpenChange={(open) => {
+          setManageDialogOpen(open);
+          if (!open) setSelectedWorker(null);
+        }}
+        tasks={tasks}
+        plotsById={plotsById}
+        onUpdated={handleWorkerUpdated}
+        onDeleted={handleWorkerDeleted}
+        onTaskUpdated={handleTaskUpdated}
+      />
     </div>
   );
 }

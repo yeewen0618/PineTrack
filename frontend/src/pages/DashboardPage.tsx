@@ -1,12 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { WeatherCard } from '../components/WeatherCard';
 import { PlotCard } from '../components/PlotCard';
-import { Sun, CloudSun, CloudRain, Cloud, AlertTriangle, Calendar, Users } from 'lucide-react';
+import { Sun, CloudSun, CloudRain, Cloud, Calendar, Users, AlertTriangle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 
 import { calcHarvestProgressPercent } from '../lib/progress';
+import { sortPlotsById } from '../lib/sortPlots';
+import { InsightRecommendationsCard } from '../components/insights/InsightRecommendationsCard';
 
 // ✅ Use real API
 import { listPlots, listTasks, getDashboardWeather, getAnalyticsHistory, getWeatherAnalytics, getWeatherRescheduleSuggestions } from '../lib/api';
@@ -76,7 +78,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     try {
       // 1) Load plots
       const plotsRes = await listPlots();
-      const plotsData = plotsRes.data ?? [];
+      const plotsData = sortPlotsById(plotsRes.data ?? []);
       setPlots(plotsData);
 
       // 2) Load tasks (all tasks)
@@ -387,66 +389,12 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
           )}
 
           {/* Insight Recommendation (Replaces Critical Actions) */}
-          <Card className="p-6 rounded-2xl bg-gradient-to-br from-[#10B981] to-[#059669] text-white shadow-sm border-0">
-            <div className="flex items-center gap-2 mb-4">
-              <AlertTriangle className="text-white" size={20} />
-              <h3 className="text-white font-semibold">Insight Recommendations</h3>
-            </div>
-
-            <div className="space-y-3">
-              {weatherSuggestions.length > 0 ? (
-                weatherSuggestions.slice(0, 3).map((sugg, idx) => {
-                  let icon = '🌧️';
-                  if (sugg.type === 'DELAY') icon = '⏳';
-                  else if (sugg.type === 'TIME_SHIFT') icon = '🕘';
-                  else if (sugg.type === 'TRIGGER') icon = '🚨';
-                  else if (sugg.type === 'PRIORITY') icon = '🔥';
-
-                  return (
-                    <div
-                      key={idx}
-                      className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-colors border border-white/10 backdrop-blur-sm cursor-pointer"
-                      onClick={() => onNavigate('reschedule')} // Navigate to Reschedule Page on click
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-lg">{icon}</span>
-                        <p className="text-sm font-medium text-white line-clamp-1">
-                          {sugg.task_name}
-                        </p>
-                      </div>
-                      <p className="text-xs text-white/90 font-light leading-snug">
-                         {(sugg.type === 'TRIGGER' || sugg.type === 'PRIORITY') ? (
-                           <span>Action: <b>{sugg.task_name}</b></span>
-                         ) : (
-                           <span>Reschedule: <b>{sugg.original_date}</b> → <b>{sugg.suggested_date}</b></span>
-                         )}
-                        <br/>
-                        <span className="opacity-80 italic">{sugg.reason}</span>
-                      </p>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="p-4 text-center bg-white/10 rounded-xl">
-                  <p className="text-sm text-white/90">
-                    ✅ No immediate actions required.
-                  </p>
-                </div>
-              )}
-            </div>
-            {weatherSuggestions.length > 3 && (
-                <div className="mt-3 text-center">
-                    <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="text-white hover:bg-white/20 h-8 text-xs w-full"
-                        onClick={() => onNavigate('reschedule')}
-                    >
-                        View all ({weatherSuggestions.length})
-                    </Button>
-                </div>
-            )}
-          </Card>
+          <InsightRecommendationsCard
+            variant="dashboard"
+            suggestions={weatherSuggestions}
+            onSuggestionClick={() => onNavigate('reschedule')}
+            onViewAll={() => onNavigate('reschedule')}
+          />
 
           {/* Upcoming Tasks */}
           <Card className="p-6 rounded-2xl bg-white">

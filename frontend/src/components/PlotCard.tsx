@@ -31,32 +31,28 @@ export function PlotCard({ plot, progressPercent, onClick }: PlotCardProps) {
       `}
     >
       {/* Header */}
-      <div className="flex items-start justify-between mb-3">
+      <div className="flex items-start justify-between mb-4">
         <div>
-          <p className="text-xs text-[#6B7280]">{plot.id}</p>
-          <h4 className="text-[#111827]">{plot.name}</h4>
-          <p className="text-sm text-[#6B7280]">{plot.crop_type}</p>
+          <p className="text-sm text-[#6B7280]">{plot.id}</p>
+          <h4 className="text-lg font-semibold leading-snug text-[#111827]">{plot.name}</h4>
+          <p className="text-base text-[#6B7280]">{plot.crop_type}</p>
         </div>
         <StatusBadge status={plot.status} size="sm" />
       </div>
 
       {/* Meta */}
-      <div className="grid grid-cols-2 gap-4 text-sm mb-4">
+      <div className="grid grid-cols-1 gap-4 text-sm mb-4">
         <div>
-          <p className="text-[#6B7280]">Area</p>
-          <p className="text-[#111827]">{plot.area_ha} ha</p>
-        </div>
-        <div>
-          <p className="text-[#6B7280]">Growth Stage</p>
-          <p className="text-[#111827]">{plot.growth_stage}</p>
+          <p className="text-sm text-[#6B7280]">Area</p>
+          <p className="text-base font-medium text-[#111827]">{plot.area_ha} ha</p>
         </div>
       </div>
 
       {/* Progress (same logic as Plot Management) */}
       <div>
-        <div className="flex justify-between text-sm mb-1">
-          <span className="text-[#6B7280]">Progress</span>
-          <span className="text-[#111827]">{progressPercent}%</span>
+        <div className="flex justify-between text-sm mb-2">
+          <span className="text-sm text-[#6B7280]">Progress</span>
+          <span className="text-base font-semibold text-[#111827]">{progressPercent}%</span>
         </div>
         <div className="w-full h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
           <div

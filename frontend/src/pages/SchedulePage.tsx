@@ -1,9 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { StatusBadge } from '../components/StatusBadge';
-import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, Clock } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, Clock, XCircle } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -20,7 +19,7 @@ import {
 } from '../components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { toast } from 'sonner';
-import { useParams } from "react-router-dom";
+// import { useParams } from "react-router-dom";
 import { listPlots, listTasks } from '../lib/api';
 import type { Plot } from '../lib/api';
 
@@ -44,7 +43,8 @@ export function SchedulePage() {
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>("month");
-  const [selectedTask, setSelectedTask] = useState<any>(null);
+  const [selectedTask, setSelectedTask] = useState<ScheduleTaskVM | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const [plots, setPlots] = useState<Plot[]>([]);
   const [tasks, setTasks] = useState<ScheduleTaskVM[]>([]);
@@ -53,50 +53,142 @@ export function SchedulePage() {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const day = currentDate.getDate();
+  const today = new Date();
+
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const parseDateString = (dateStr: string) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const isPastDate = (dateStr: string) => parseDateString(dateStr) < startOfToday;
+
+  const formatTaskDate = (dateStr: string) =>
+    parseDateString(dateStr).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+  const getTaskContainerClasses = (task: ScheduleTaskVM) => {
+    if (isPastDate(task.date)) return 'bg-gray-100 border border-gray-200 opacity-80';
+    if (task.status === 'Proceed') return 'bg-green-100 border border-green-200';
+    if (task.status === 'Pending') return 'bg-amber-100 border border-amber-200';
+    return 'bg-red-100 border border-red-200';
+  };
+
+  const getTaskTextColor = (task: ScheduleTaskVM, tone: 'primary' | 'secondary' = 'primary') => {
+    if (isPastDate(task.date)) return 'text-gray-500';
+    if (task.status === 'Proceed') return tone === 'primary' ? 'text-green-800' : 'text-green-700';
+    if (task.status === 'Pending') return tone === 'primary' ? 'text-amber-800' : 'text-amber-700';
+    return tone === 'primary' ? 'text-red-800' : 'text-red-700';
+  };
+
+  const getTaskStatusLabel = (task: ScheduleTaskVM) => {
+    if (isPastDate(task.date)) return 'Done';
+    if (task.status === 'Stop') return 'Stopped';
+    return task.status;
+  };
+
+  const getTaskStatusIcon = (task: ScheduleTaskVM) => {
+    if (isPastDate(task.date)) return Check;
+    if (task.status === 'Pending') return Clock;
+    if (task.status === 'Stop') return XCircle;
+    return null;
+  };
+
+  const getDayCellBackground = (dayTasks: ScheduleTaskVM[], isTodayCell: boolean) => {
+    const activeTasks = dayTasks.filter((task) => !isPastDate(task.date));
+    const hasStop = activeTasks.some((task) => task.status === 'Stop');
+    const hasPending = activeTasks.some((task) => task.status === 'Pending');
+
+    if (hasStop) return 'bg-red-50';
+    if (hasPending) return 'bg-amber-50';
+    return isTodayCell ? 'bg-slate-50' : 'bg-white';
+  };
+
+  const renderTaskStatusBadge = (task: ScheduleTaskVM) => {
+    const StatusIcon = getTaskStatusIcon(task);
+
+    return (
+      <div
+        className={`inline-flex items-center justify-center gap-1.5 rounded-[16px] h-[28px] px-3 ${getTaskContainerClasses(task)} ${getTaskTextColor(task)}`}
+        style={{ minWidth: '90px' }}
+      >
+        {StatusIcon && <StatusIcon size={14} className="text-current" aria-hidden="true" />}
+        <span className="text-[14px] font-medium">{getTaskStatusLabel(task)}</span>
+      </div>
+    );
+  };
+
+  const loadScheduleData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [plotsRes, tasksRes] = await Promise.all([
+        listPlots(),
+        listTasks(), // Note: all tasks
+      ]);
+
+      const plotsData = plotsRes.data ?? [];
+      setPlots(plotsData);
+
+      const nameById = new Map(plotsData.map((p) => [p.id, p.name]));
+
+      const vm: ScheduleTaskVM[] = (tasksRes.data ?? []).map((t: {
+        id: string;
+        title: string;
+        decision?: "Proceed" | "Pending" | "Stop";
+        status?: "Proceed" | "Pending" | "Stop";
+        task_date: string;
+        plot_id: string;
+        description?: string | null;
+        assigned_worker_name?: string | null;
+        reason?: string | null;
+      }) => ({
+        id: t.id,
+        title: t.title,
+        status: t.decision ?? t.status,
+        date: t.task_date,
+        plotId: t.plot_id,
+        plotName: nameById.get(t.plot_id) ?? t.plot_id,
+        description: t.description ?? null,
+        assignedWorker: t.assigned_worker_name ?? null,
+        reason: t.reason ?? null,
+      }));
+
+      setTasks(vm);
+
+      // Note: ensure default filter stays global
+      setFilterPlot("all");
+    } catch (e) {
+      toast.error((e as Error)?.message ?? "Failed to load schedule data");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const [plotsRes, tasksRes] = await Promise.all([
-          listPlots(),
-          listTasks(), // ✅ all tasks
-        ]);
+    loadScheduleData();
+  }, [loadScheduleData]);
 
-        const plotsData = plotsRes.data ?? [];
-        setPlots(plotsData);
-
-        const nameById = new Map(plotsData.map((p) => [p.id, p.name]));
-
-        const vm: ScheduleTaskVM[] = (tasksRes.data ?? []).map((t: any) => ({
-          id: t.id,
-          title: t.title,
-          status: t.decision ?? t.status,
-          date: t.task_date,
-          plotId: t.plot_id,
-          plotName: nameById.get(t.plot_id) ?? t.plot_id,
-          description: t.description ?? null,
-          assignedWorker: t.assigned_worker_name ?? null,
-          reason: t.reason ?? null,
-        }));
-
-        setTasks(vm);
-
-        // ✅ ensure default filter stays global
-        setFilterPlot("all");
-      } catch (e: any) {
-        toast.error(e?.message ?? "Failed to load schedule data");
-      } finally {
-        setLoading(false);
-      }
+  useEffect(() => {
+    const handler = () => {
+      loadScheduleData();
     };
-
-    load();
-  }, []);
+    window.addEventListener("tasks:refresh", handler);
+    return () => window.removeEventListener("tasks:refresh", handler);
+  }, [loadScheduleData]);
 
 
   // Generate calendar days for month view
-  const getMonthCalendarDays = () => {
+  const getMonthCalendarDays = useCallback(() => {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
 
@@ -116,9 +208,9 @@ export function SchedulePage() {
     }
 
     return days;
-  };
+  }, [year, month]);
 
-  const getTasksForDate = (dateStr: string) => {
+  const getTasksForDate = useCallback((dateStr: string) => {
     let tasksForDate = tasks.filter((task) => task.date === dateStr);
 
     if (filterPlot !== 'all') {
@@ -129,7 +221,12 @@ export function SchedulePage() {
     }
 
     return tasksForDate;
-  };
+  }, [tasks, filterPlot, filterStatus]);
+
+  const selectedDateTasks = useMemo(() => {
+    if (!selectedDate) return [];
+    return getTasksForDate(selectedDate);
+  }, [selectedDate, getTasksForDate]);
 
   const getTasksForDay = (d: number) => {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -217,7 +314,7 @@ export function SchedulePage() {
     return weekTasks;
   };
 
-  const days = useMemo(() => getMonthCalendarDays(), [year, month, tasks, filterPlot, filterStatus]);
+  const days = useMemo(() => getMonthCalendarDays(), [getMonthCalendarDays]);
 
   return (
     <div className="space-y-6">
@@ -334,7 +431,7 @@ export function SchedulePage() {
         {/* Loading hint */}
         {loading && (
           <div className="p-4 text-sm text-[#6B7280]">
-            Loading schedule from database…
+            Loading schedule from databaseâ€¦
           </div>
         )}
 
@@ -355,40 +452,73 @@ export function SchedulePage() {
                   return <div key={`empty-${index}`} className="h-[84px] border border-transparent" />;
                 }
 
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                 const dayTasks = getTasksForDay(d);
                 const maxVisible = 1;
+                const isToday = isSameDay(new Date(year, month, d), today);
+                const dayBackground = getDayCellBackground(dayTasks, isToday);
+                const showTodayBadge = isToday && dayTasks.length <= maxVisible;
 
                 return (
-                  <div key={d} className="h-[84px] border border-[#E5E7EB] rounded-xl bg-white p-2 relative">
-                    <div className="text-[14px] text-[#111827]">{d}</div>
+                  <div
+                    key={d}
+                    className={`h-[84px] border border-gray-200 rounded-xl p-2 relative cursor-pointer ${dayBackground} ${isToday ? 'ring-2 ring-blue-300' : ''}`}
+                    onClick={() => setSelectedDate(dateStr)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') setSelectedDate(dateStr);
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="text-[14px] text-[#111827]">{d}</div>
+                      {showTodayBadge && (
+                        <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
+                          Today
+                        </span>
+                      )}
+                    </div>
 
                     <div className="mt-1 space-y-1">
-                      {dayTasks.slice(0, maxVisible).map((task) => (
-                        <TooltipProvider key={task.id}>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div
-                                className={`text-[12px] px-2 py-1 rounded-lg cursor-pointer truncate ${task.status === 'Proceed'
-                                  ? 'bg-[#DCFCE7] text-[#166534]'
-                                  : task.status === 'Pending'
-                                    ? 'bg-[#FEF3C7] text-[#92400E]'
-                                    : 'bg-[#FEE2E2] text-[#991B1B]'
-                                  }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedTask(task);
-                                }}
-                              >
-                                {task.title}
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent className="max-w-[220px]">
-                              <p className="font-medium">{task.title}</p>
-                              <p className="text-xs text-[#6B7280]">{task.plotName} • {task.date}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      ))}
+                      {dayTasks.slice(0, maxVisible).map((task) => {
+                        const isPastTask = isPastDate(task.date);
+                        const StatusIcon = getTaskStatusIcon(task);
+
+                        return (
+                          <TooltipProvider key={task.id}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div
+                                  className={`text-[12px] px-2 py-1 rounded-lg ${getTaskContainerClasses(task)} ${getTaskTextColor(task)} ${isPastTask ? 'cursor-default' : 'cursor-pointer'}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!isPastTask) setSelectedTask(task);
+                                  }}
+                                  aria-disabled={isPastTask}
+                                >
+                                  <p className="flex items-center gap-1 min-w-0">
+                                    {StatusIcon && <StatusIcon size={12} className="text-current" aria-hidden="true" />}
+                                    <span className="truncate">
+                                      {isPastTask ? `Done: ${task.title}` : task.title}
+                                    </span>
+                                  </p>
+                                  <p className={`text-[10px] truncate ${getTaskTextColor(task, 'secondary')}`}>
+                                    {task.assignedWorker ?? 'Unassigned'}
+                                  </p>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-[220px]">
+                                <p className="font-medium">{task.title}</p>
+                                <p className="text-xs text-[#6B7280]">{task.plotName} ??? {task.date}</p>
+                                <p className="text-xs text-[#6B7280]">Worker: {task.assignedWorker ?? 'Unassigned'}</p>
+                                {isPastTask && (
+                                  <p className="text-xs text-gray-500">Task completed on {formatTaskDate(task.date)}</p>
+                                )}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        );
+                      })}
 
                       {dayTasks.length > maxVisible && (
                         <Badge className="absolute top-2 right-2 bg-[#111827] text-white text-[11px] rounded-full px-2">
@@ -406,7 +536,7 @@ export function SchedulePage() {
         {/* Week View (Month-style, one row) */}
         {viewMode === 'week' && (
           <div className="p-4">
-            {/* Day headers (Mon → Sun) */}
+            {/* Day headers (Mon â†’ Sun) */}
             <div className="grid grid-cols-7 gap-2 mb-2">
               {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((dayName) => (
                 <div
@@ -423,7 +553,7 @@ export function SchedulePage() {
               {(() => {
                 const week = getWeekTasks();
 
-                // Reorder to Mon → Sun (in case your getWeekTasks() is Sun → Sat)
+                // Reorder to Mon â†’ Sun (in case your getWeekTasks() is Sun â†’ Sat)
                 const order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
                 const weekOrdered = [...week].sort(
                   (a, b) => order.indexOf(a.dayName) - order.indexOf(b.dayName)
@@ -433,45 +563,71 @@ export function SchedulePage() {
 
                 return weekOrdered.map((dayData) => {
                   const dayTasks = dayData.tasks ?? [];
+                  const isToday = isSameDay(parseDateString(dayData.date), today);
+                  const dayBackground = getDayCellBackground(dayTasks, isToday);
+                  const showTodayBadge = isToday && dayTasks.length <= maxVisible;
 
                   return (
                     <div
                       key={dayData.date}
-                      className="h-[84px] border border-[#E5E7EB] rounded-xl bg-white p-2 relative"
+                      className={`h-[84px] border border-gray-200 rounded-xl p-2 relative cursor-pointer ${dayBackground} ${isToday ? 'ring-2 ring-blue-300' : ''}`}
+                      onClick={() => setSelectedDate(dayData.date)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') setSelectedDate(dayData.date);
+                      }}
                     >
                       {/* Day number (same style as month view) */}
-                      <div className="text-[14px] text-[#111827]">{dayData.dayNumber}</div>
+                      <div className="flex items-center justify-between">
+                        <div className="text-[14px] text-[#111827]">{dayData.dayNumber}</div>
+                        {showTodayBadge && (
+                          <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
+                            Today
+                          </span>
+                        )}
+                      </div>
 
                       <div className="mt-1 space-y-1">
-                        {dayTasks.slice(0, maxVisible).map((task) => (
-                          <TooltipProvider key={task.id}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div
-                                  className={`text-[12px] px-2 py-1 rounded-lg cursor-pointer truncate ${task.status === 'Proceed'
-                                    ? 'bg-[#DCFCE7] text-[#166534]'
-                                    : task.status === 'Pending'
-                                      ? 'bg-[#FEF3C7] text-[#92400E]'
-                                      : 'bg-[#FEE2E2] text-[#991B1B]'
-                                    }`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedTask(task);
-                                  }}
-                                >
-                                  {task.title}
-                                </div>
-                              </TooltipTrigger>
+                        {dayTasks.slice(0, maxVisible).map((task) => {
+                          const isPastTask = isPastDate(task.date);
+                          const StatusIcon = getTaskStatusIcon(task);
 
-                              <TooltipContent className="max-w-[220px]">
-                                <p className="font-medium">{task.title}</p>
-                                <p className="text-xs text-[#6B7280]">
-                                  {task.plotName} • {task.date}
-                                </p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        ))}
+                          return (
+                            <TooltipProvider key={task.id}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div
+                                    className={`text-[12px] px-2 py-1 rounded-lg ${getTaskContainerClasses(task)} ${getTaskTextColor(task)} ${isPastTask ? 'cursor-default' : 'cursor-pointer'}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!isPastTask) setSelectedTask(task);
+                                    }}
+                                    aria-disabled={isPastTask}
+                                  >
+                                    <p className="flex items-center gap-1 min-w-0">
+                                      {StatusIcon && <StatusIcon size={12} className="text-current" aria-hidden="true" />}
+                                      <span className="truncate">
+                                        {isPastTask ? `Done: ${task.title}` : task.title}
+                                      </span>
+                                    </p>
+                                    <p className={`text-[10px] truncate ${getTaskTextColor(task, 'secondary')}`}>
+                                      {task.assignedWorker ?? 'Unassigned'}
+                                    </p>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-[220px]">
+                                  <p className="font-medium">{task.title}</p>
+                                  <p className="text-xs text-[#6B7280]">{task.plotName} ??? {task.date}</p>
+                                  <p className="text-xs text-[#6B7280]">Worker: {task.assignedWorker ?? 'Unassigned'}</p>
+                                  {isPastTask && (
+                                    <p className="text-xs text-gray-500">Task completed on {formatTaskDate(task.date)}</p>
+                                  )}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          );
+                        })}
 
                         {dayTasks.length > maxVisible && (
                           <Badge className="absolute top-2 right-2 bg-[#111827] text-white text-[11px] rounded-full px-2">
@@ -492,34 +648,50 @@ export function SchedulePage() {
         {/* Day View */}
         {viewMode === 'day' && (
           <div className="p-4">
-            <div className="space-y-3">
-              {getDayTasks().map((task) => (
-                <div
-                  key={task.id}
-                  className="p-3 rounded-xl border border-[#E5E7EB] hover:bg-[#F9FAFB] cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedTask(task);
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    {/* LEFT */}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[14px] text-[#111827] font-medium truncate">
-                        {task.title}
-                      </p>
-                      <p className="text-[12px] text-[#6B7280] truncate">
-                        {task.plotName} • {task.date}
-                      </p>
-                    </div>
+            <div
+              className={`space-y-3 ${isSameDay(currentDate, today)
+                ? 'rounded-xl bg-slate-50 ring-2 ring-blue-300'
+                : ''
+                }`}
+            >
+              {getDayTasks().map((task) => {
+                const isPastTask = isPastDate(task.date);
 
-                    {/* RIGHT */}
-                    <div className="shrink-0">
-                      <StatusBadge status={task.status} />
+                return (
+                  <div
+                    key={task.id}
+                    className={`p-3 rounded-xl ${getTaskContainerClasses(task)} ${isPastTask
+                      ? 'cursor-default'
+                      : 'cursor-pointer transition-shadow hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
+                      }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isPastTask) setSelectedTask(task);
+                    }}
+                    title={isPastTask ? `Task completed on ${formatTaskDate(task.date)}` : undefined}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      {/* LEFT */}
+                      <div className="min-w-0 flex-1">
+                        <p className={`text-[14px] font-medium truncate ${getTaskTextColor(task)}`}>
+                          {task.title}
+                        </p>
+                        <p className={`text-[12px] truncate ${getTaskTextColor(task, 'secondary')}`}>
+                          {task.plotName} ??? {task.date}
+                        </p>
+                        <p className={`text-[12px] truncate ${getTaskTextColor(task, 'secondary')}`}>
+                          Worker: {task.assignedWorker ?? 'Unassigned'}
+                        </p>
+                      </div>
+
+                      {/* RIGHT */}
+                      <div className="shrink-0">
+                        {renderTaskStatusBadge(task)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {getDayTasks().length === 0 && (
                 <p className="text-[12px] text-[#9CA3AF]">No tasks scheduled for this day</p>
@@ -547,22 +719,20 @@ export function SchedulePage() {
           <DialogHeader>
             <DialogTitle>{selectedTask?.title}</DialogTitle>
             <DialogDescription>
-              {selectedTask?.plotName} • {selectedTask?.date}
+              {selectedTask?.plotName} â€¢ {selectedTask?.date}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3 text-sm">
             <div className="flex items-center justify-between">
               <span className="text-[#6B7280]">Status</span>
-              <StatusBadge status={selectedTask?.status} />
+              {selectedTask ? renderTaskStatusBadge(selectedTask) : null}
             </div>
 
-            {selectedTask?.assignedWorker && (
-              <div className="flex items-center justify-between">
-                <span className="text-[#6B7280]">Assigned</span>
-                <span>{selectedTask.assignedWorker}</span>
-              </div>
-            )}
+            <div className="flex items-center justify-between">
+              <span className="text-[#6B7280]">Assigned</span>
+              <span>{selectedTask?.assignedWorker ?? 'Unassigned'}</span>
+            </div>
 
             {selectedTask?.description && (
               <div>
@@ -580,6 +750,72 @@ export function SchedulePage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Date Details Dialog */}
+      <Dialog
+        key={selectedDate ?? 'date-dialog'}
+        open={!!selectedDate}
+        onOpenChange={(open) => {
+          if (!open) setSelectedDate(null);
+        }}
+      >
+        <DialogContent
+          className="rounded-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {selectedDate
+                ? new Date(selectedDate).toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                })
+                : 'Selected Date'}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedDateTasks.length} task{selectedDateTasks.length === 1 ? '' : 's'} matching current filters
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {selectedDateTasks.map((task) => {
+              const isPastTask = isPastDate(task.date);
+
+              return (
+                <div
+                  key={task.id}
+                  className={`p-3 rounded-xl ${getTaskContainerClasses(task)}`}
+                  title={isPastTask ? `Task completed on ${formatTaskDate(task.date)}` : undefined}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[14px] font-medium truncate ${getTaskTextColor(task)}`}>
+                        {task.title}
+                      </p>
+                      <p className={`text-[12px] truncate ${getTaskTextColor(task, 'secondary')}`}>
+                        {task.plotName} ({task.plotId})
+                      </p>
+                    </div>
+                    {renderTaskStatusBadge(task)}
+                  </div>
+                  <div className={`mt-2 text-[12px] ${getTaskTextColor(task, 'secondary')}`}>
+                    <p>Date: {task.date}</p>
+                    <p>Worker: {task.assignedWorker ?? 'Unassigned'}</p>
+                  </div>
+                </div>
+              );
+            })}
+
+            {selectedDateTasks.length === 0 && (
+              <p className="text-[12px] text-[#9CA3AF]">No tasks for this date under current filters.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
+

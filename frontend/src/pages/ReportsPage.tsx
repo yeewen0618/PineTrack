@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import {
   Table,
   TableBody,
@@ -10,315 +9,321 @@ import {
   TableHeader,
   TableRow
 } from '../components/ui/table';
-import { mockTasks, mockPlots } from '../lib/mockData';
-import { Download, Calendar, CheckCircle2, FileText, BarChart3 } from 'lucide-react';
+import { listPlots, listTasks, listWorkers } from '../lib/api';
+import type { Plot, Task, Worker } from '../lib/api';
 import { toast } from 'sonner';
+import { Printer } from 'lucide-react';
+
+const monthKey = (value: string | Date) => {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const formatMonthLabel = (key: string) => {
+  if (!key) return 'Unknown month';
+  const [year, month] = key.split('-').map(Number);
+  if (!year || !month) return key;
+  return new Date(year, month - 1, 1).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric'
+  });
+};
+
+const toWorkerKey = (task: Task) => {
+  const id = task.assigned_worker_id?.trim();
+  const name = task.assigned_worker_name?.trim();
+  if (id) return { key: id, name };
+  if (name) return { key: name, name };
+  return { key: 'unassigned', name: 'Unassigned' };
+};
 
 export function ReportsPage() {
-  const [dateRange, setDateRange] = useState('last-30-days');
+  const [plots, setPlots] = useState<Plot[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState(monthKey(new Date()));
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [printTarget, setPrintTarget] = useState<'plot' | 'worker' | null>(null);
 
-  const completedTasks = mockTasks.filter((task) => {
-    const taskDate = new Date(task.date);
-    const today = new Date('2025-11-05');
-    return taskDate < today;
-  });
-
-  const rescheduledTasks = mockTasks.filter((task) => task.proposedDate);
-
-  const handleExportReport = (reportType: string) => {
-    toast.success(`${reportType} report exported successfully`);
+  const handlePrint = (target: 'plot' | 'worker') => {
+    setPrintTarget(target);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => window.print());
+    });
   };
 
+  useEffect(() => {
+    let isActive = true;
+
+    Promise.all([listPlots(), listTasks(), listWorkers()])
+      .then(([plotsRes, tasksRes, workersRes]) => {
+        if (!isActive) return;
+        setError(null);
+        setPlots(plotsRes.data ?? []);
+        setTasks(tasksRes.data ?? []);
+        setWorkers(workersRes.data ?? []);
+      })
+      .catch((err: Error) => {
+        if (!isActive) return;
+        setError(err.message || 'Failed to load report data');
+        toast.error('Failed to load report data');
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (printTarget) {
+      document.body.setAttribute('data-report-print', printTarget);
+    } else {
+      document.body.removeAttribute('data-report-print');
+    }
+  }, [printTarget]);
+
+  useEffect(() => {
+    const handleAfterPrint = () => setPrintTarget(null);
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => window.removeEventListener('afterprint', handleAfterPrint);
+  }, []);
+
+  const tasksForMonth = useMemo(
+    () => tasks.filter((task) => monthKey(task.task_date) === selectedMonth),
+    [tasks, selectedMonth]
+  );
+
+  const plotRows = useMemo(() => {
+    const byPlot = new Map<
+      string,
+      { total: number; proceed: number; pending: number; stop: number }
+    >();
+
+    tasksForMonth.forEach((task) => {
+      const entry =
+        byPlot.get(task.plot_id) ?? { total: 0, proceed: 0, pending: 0, stop: 0 };
+      entry.total += 1;
+      if (task.decision === 'Proceed') entry.proceed += 1;
+      if (task.decision === 'Pending') entry.pending += 1;
+      if (task.decision === 'Stop') entry.stop += 1;
+      byPlot.set(task.plot_id, entry);
+    });
+
+    return plots
+      .map((plot) => {
+        const counts = byPlot.get(plot.id) ?? {
+          total: 0,
+          proceed: 0,
+          pending: 0,
+          stop: 0
+        };
+        const completionRate =
+          counts.total === 0 ? 0 : Math.round((counts.proceed / counts.total) * 100);
+        return {
+          plotId: plot.id,
+          plotName: plot.name,
+          ...counts,
+          completionRate
+        };
+      })
+      .sort((a, b) => {
+        if (b.total !== a.total) return b.total - a.total;
+        return a.plotName.localeCompare(b.plotName);
+      });
+  }, [plots, tasksForMonth]);
+
+  const workerIndex = useMemo(() => {
+    return new Map(workers.map((worker) => [worker.id, worker.name]));
+  }, [workers]);
+
+  const workerRows = useMemo(() => {
+    const byWorker = new Map<
+      string,
+      { workerKey: string; workerName: string; total: number; proceed: number; pending: number; stop: number }
+    >();
+
+    tasksForMonth.forEach((task) => {
+      const { key, name } = toWorkerKey(task);
+      const workerName = workerIndex.get(key) ?? name ?? 'Unknown Worker';
+      const entry =
+        byWorker.get(key) ?? {
+          workerKey: key,
+          workerName,
+          total: 0,
+          proceed: 0,
+          pending: 0,
+          stop: 0
+        };
+
+      entry.total += 1;
+      if (task.decision === 'Proceed') entry.proceed += 1;
+      if (task.decision === 'Pending') entry.pending += 1;
+      if (task.decision === 'Stop') entry.stop += 1;
+      entry.workerName = workerName;
+      byWorker.set(key, entry);
+    });
+
+    return Array.from(byWorker.values()).sort((a, b) => {
+      if (b.proceed !== a.proceed) return b.proceed - a.proceed;
+      if (b.total !== a.total) return b.total - a.total;
+      return a.workerName.localeCompare(b.workerName);
+    });
+  }, [tasksForMonth, workerIndex]);
+
+  const monthLabel = formatMonthLabel(selectedMonth);
+  const isEmptyMonth = !loading && tasksForMonth.length === 0;
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 report-print-page">
+      <div className="print-only report-print-header">
+        <div>
+          <h1 className="text-[22px] text-[#111827]">Reports & History</h1>
+          <p className="text-sm text-[#6B7280]">Month: {monthLabel}</p>
+        </div>
+        <div className="text-sm text-[#6B7280]">
+          Generated {new Date().toLocaleDateString('en-US')}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-[20px] text-[#111827]">Reports & History</h2>
-          <p className="text-[16px] text-[#374151]">View and export historical data and summaries</p>
+          <p className="text-[16px] text-[#374151]">
+            Monthly reports for plot progress and worker performance
+          </p>
         </div>
 
-        <div className="flex gap-3">
-          <select
-            value={dateRange}
-            onChange={(e) => setDateRange(e.target.value)}
+        <div className="flex items-center gap-3 print:hidden">
+          <label className="text-sm text-[#6B7280]" htmlFor="report-month">
+            Month
+          </label>
+          <input
+            id="report-month"
+            type="month"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
             className="h-10 px-3 rounded-xl border border-[#E5E7EB] bg-white text-[#111827] focus:border-[#15803D] focus:ring-[#15803D] focus:outline-none"
-            aria-label="Select date range"
-          >
-            <option value="last-7-days">Last 7 Days</option>
-            <option value="last-30-days">Last 30 Days</option>
-            <option value="last-90-days">Last 90 Days</option>
-            <option value="this-year">This Year</option>
-          </select>
+            aria-label="Select month"
+          />
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="p-5 rounded-2xl bg-white">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-[#16A34A]/10 rounded-xl flex items-center justify-center">
-              <CheckCircle2 className="text-[#16A34A]" size={20} />
-            </div>
-            <div>
-              <p className="text-sm text-[#6B7280]">Completed Tasks</p>
-              <p className="text-2xl text-[#111827]">{completedTasks.length}</p>
-            </div>
-          </div>
+      {error && (
+        <Card className="p-4 rounded-2xl bg-white border border-[#FCA5A5]">
+          <p className="text-sm text-[#991B1B]">{error}</p>
         </Card>
+      )}
 
-        <Card className="p-5 rounded-2xl bg-white">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-[#CA8A04]/10 rounded-xl flex items-center justify-center">
-              <Calendar className="text-[#CA8A04]" size={20} />
-            </div>
-            <div>
-              <p className="text-sm text-[#6B7280]">Rescheduled</p>
-              <p className="text-2xl text-[#111827]">{rescheduledTasks.length}</p>
-            </div>
-          </div>
+      {loading && (
+        <Card className="p-6 rounded-2xl bg-white">
+          <p className="text-sm text-[#6B7280]">Loading report data...</p>
         </Card>
+      )}
 
-        <Card className="p-5 rounded-2xl bg-white">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-[#2563EB]/10 rounded-xl flex items-center justify-center">
-              <BarChart3 className="text-[#2563EB]" size={20} />
-            </div>
-            <div>
-              <p className="text-sm text-[#6B7280]">Completion Rate</p>
-              <p className="text-2xl text-[#111827]">96%</p>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="p-5 rounded-2xl bg-white">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-[#8B5CF6]/10 rounded-xl flex items-center justify-center">
-              <FileText className="text-[#8B5CF6]" size={20} />
-            </div>
-            <div>
-              <p className="text-sm text-[#6B7280]">Total Reports</p>
-              <p className="text-2xl text-[#111827]">48</p>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* Tabs */}
-      <Tabs defaultValue="tasks" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 rounded-xl bg-transparent">
-          <TabsTrigger
-            value="tasks"
-            className="rounded-lg data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8]"
-          >
-            Task History
-          </TabsTrigger>
-
-          <TabsTrigger
-            value="harvest"
-            className="rounded-lg data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8]"
-          >
-            Harvest Summary
-          </TabsTrigger>
-
-          <TabsTrigger
-            value="reschedule"
-            className="rounded-lg data-[state=active]:bg-[#B9EEC9] data-[state=active]:text-[#065F46] hover:bg-[#DFF7E8]"
-          >
-            Reschedule Log
-          </TabsTrigger>
-        </TabsList>
-
-
-
-        {/* Task History */}
-        <TabsContent value="tasks" className="mt-6">
-          <Card className="rounded-2xl bg-white overflow-hidden">
-            <div className="p-6 border-b border-[#E5E7EB] flex items-center justify-between">
-              <h3 className="text-[#111827]">Task History</h3>
-              <Button
-                variant="outline"
-                className="rounded-xl gap-2"
-                onClick={() => handleExportReport('Task History')}
-              >
-                <Download size={16} />
-                Export
-              </Button>
-            </div>
-
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-[#F9FAFB] hover:bg-[#F9FAFB]">
-                  <TableHead>Date</TableHead>
-                  <TableHead>Plot</TableHead>
-                  <TableHead>Task</TableHead>
-                  <TableHead>Worker</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Outcome</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {completedTasks.slice(0, 10).map((task) => (
-                  <TableRow key={task.id} className="hover:bg-[#F9FAFB]">
-                    <TableCell>
-                      {new Date(task.date).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric'
-                      })}
-                    </TableCell>
-                    <TableCell className="font-medium">{task.plotName}</TableCell>
-                    <TableCell>{task.title}</TableCell>
-                    <TableCell>{task.assignedWorker}</TableCell>
-                    <TableCell>
-                      <span className="px-2 py-1 bg-[#DCFCE7] text-[#16A34A] text-xs rounded-lg">
-                        Completed
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-[#6B7280]">Success</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Card>
-        </TabsContent>
-
-        {/* Harvest Summary */}
-        <TabsContent value="harvest" className="mt-6">
-          <Card className="rounded-2xl bg-white overflow-hidden">
-            <div className="p-6 border-b border-[#E5E7EB] flex items-center justify-between">
-              <h3 className="text-[#111827]">Harvest Summary</h3>
-              <Button
-                variant="outline"
-                className="rounded-xl gap-2"
-                onClick={() => handleExportReport('Harvest Summary')}
-              >
-                <Download size={16} />
-                Export
-              </Button>
-            </div>
-
-            <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div className="p-5 bg-[#F9FAFB] rounded-xl">
-                  <p className="text-sm text-[#6B7280] mb-2">Plot B-2</p>
-                  <h4 className="text-xl text-[#111827] mb-1">3,245 kg</h4>
-                  <p className="text-xs text-[#6B7280]">Harvested: Oct 15, 2024</p>
-                  <div className="mt-3 pt-3 border-t border-[#E5E7EB]">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-[#6B7280]">Grade A:</span>
-                      <span className="text-[#111827]">82%</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-[#6B7280]">Grade B:</span>
-                      <span className="text-[#111827]">15%</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-[#6B7280]">Grade C:</span>
-                      <span className="text-[#111827]">3%</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-5 bg-[#F9FAFB] rounded-xl">
-                  <p className="text-sm text-[#6B7280] mb-2">Plot C-2</p>
-                  <h4 className="text-xl text-[#111827] mb-1">2,987 kg</h4>
-                  <p className="text-xs text-[#6B7280]">Harvested: Sep 22, 2024</p>
-                  <div className="mt-3 pt-3 border-t border-[#E5E7EB]">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-[#6B7280]">Grade A:</span>
-                      <span className="text-[#111827]">78%</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-[#6B7280]">Grade B:</span>
-                      <span className="text-[#111827]">18%</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-[#6B7280]">Grade C:</span>
-                      <span className="text-[#111827]">4%</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-5 bg-gradient-to-br from-[#15803D] to-[#16A34A] text-white rounded-xl">
-                  <p className="text-sm opacity-90 mb-2">Total Yield (2024)</p>
-                  <h4 className="text-xl mb-1">18,432 kg</h4>
-                  <p className="text-xs opacity-75">Average yield per hectare: 6,144 kg</p>
-                  <div className="mt-3 pt-3 border-t border-white/20">
-                    <div className="flex justify-between text-sm">
-                      <span className="opacity-90">Overall Grade A:</span>
-                      <span>80%</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="opacity-90">Revenue Impact:</span>
-                      <span>+12%</span>
-                    </div>
-                  </div>
-                </div>
+      {!loading && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <Card className="rounded-2xl bg-white overflow-hidden report-print-card report-print-plot">
+            <div className="p-6 border-b border-[#E5E7EB] flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-[#111827]">Monthly Plot Progress</h3>
+                <p className="text-sm text-[#6B7280]">{monthLabel}</p>
               </div>
-            </div>
-          </Card>
-        </TabsContent>
-
-        {/* Reschedule Log */}
-        <TabsContent value="reschedule" className="mt-6">
-          <Card className="rounded-2xl bg-white overflow-hidden">
-            <div className="p-6 border-b border-[#E5E7EB] flex items-center justify-between">
-              <h3 className="text-[#111827]">Reschedule Log</h3>
               <Button
-                variant="outline"
-                className="rounded-xl gap-2"
-                onClick={() => handleExportReport('Reschedule Log')}
+                variant="default"
+                size="sm"
+                className="rounded-xl bg-[#16A34A] text-white hover:bg-[#15803D] report-print-controls"
+                onClick={() => handlePrint('plot')}
               >
-                <Download size={16} />
-                Export
+                <Printer size={16} />
+                Print
               </Button>
             </div>
 
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-[#F9FAFB] hover:bg-[#F9FAFB]">
-                  <TableHead>Plot</TableHead>
-                  <TableHead>Task</TableHead>
-                  <TableHead>Original Date</TableHead>
-                  <TableHead>New Date</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rescheduledTasks.map((task) => (
-                  <TableRow key={task.id} className="hover:bg-[#F9FAFB]">
-                    <TableCell className="font-medium">{task.plotName}</TableCell>
-                    <TableCell>{task.title}</TableCell>
-                    <TableCell>
-                      {task.originalDate &&
-                        new Date(task.originalDate).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric'
-                        })}
-                    </TableCell>
-                    <TableCell className="text-[#15803D]">
-                      {task.proposedDate &&
-                        new Date(task.proposedDate).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric'
-                        })}
-                    </TableCell>
-                    <TableCell className="max-w-xs">
-                      <p className="text-sm text-[#6B7280] truncate">{task.reason}</p>
-                    </TableCell>
-                    <TableCell>
-                      <span className="px-2 py-1 bg-[#FEF3C7] text-[#CA8A04] text-xs rounded-lg">
-                        Pending Approval
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <div className="p-4">
+              {isEmptyMonth ? (
+                <p className="text-sm text-[#6B7280]">No tasks recorded for this month.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-[#F9FAFB] hover:bg-[#F9FAFB]">
+                      <TableHead>Plot</TableHead>
+                      <TableHead>Total Tasks</TableHead>
+                      <TableHead>Proceed</TableHead>
+                      <TableHead>Pending</TableHead>
+                      <TableHead>Stop</TableHead>
+                      <TableHead>Completion</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {plotRows.map((row) => (
+                      <TableRow key={row.plotId} className="hover:bg-[#F9FAFB]">
+                        <TableCell className="font-medium">{row.plotName}</TableCell>
+                        <TableCell>{row.total}</TableCell>
+                        <TableCell className="text-[#16A34A]">{row.proceed}</TableCell>
+                        <TableCell className="text-[#CA8A04]">{row.pending}</TableCell>
+                        <TableCell className="text-[#DC2626]">{row.stop}</TableCell>
+                        <TableCell>{row.completionRate}%</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
           </Card>
-        </TabsContent>
-      </Tabs>
+
+          <Card className="rounded-2xl bg-white overflow-hidden report-print-card report-print-worker">
+            <div className="p-6 border-b border-[#E5E7EB] flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-[#111827]">Monthly Worker Report</h3>
+                <p className="text-sm text-[#6B7280]">{monthLabel}</p>
+              </div>
+              <Button
+                variant="default"
+                size="sm"
+                className="rounded-xl bg-[#16A34A] text-white hover:bg-[#15803D] report-print-controls"
+                onClick={() => handlePrint('worker')}
+              >
+                <Printer size={16} />
+                Print
+              </Button>
+            </div>
+
+            <div className="p-4">
+              {isEmptyMonth ? (
+                <p className="text-sm text-[#6B7280]">No tasks recorded for this month.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-[#F9FAFB] hover:bg-[#F9FAFB]">
+                      <TableHead>Worker</TableHead>
+                      <TableHead>Total Assigned</TableHead>
+                      <TableHead>Proceed</TableHead>
+                      <TableHead>Pending</TableHead>
+                      <TableHead>Stop</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {workerRows.map((row) => (
+                      <TableRow key={row.workerKey} className="hover:bg-[#F9FAFB]">
+                        <TableCell className="font-medium">{row.workerName}</TableCell>
+                        <TableCell>{row.total}</TableCell>
+                        <TableCell className="text-[#16A34A]">{row.proceed}</TableCell>
+                        <TableCell className="text-[#CA8A04]">{row.pending}</TableCell>
+                        <TableCell className="text-[#DC2626]">{row.stop}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
