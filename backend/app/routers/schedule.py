@@ -421,11 +421,12 @@ def evaluate_status_threshold_core(
     thresholds: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     readings = readings or {}
+    allowed_reading_keys = {"soil_moisture", "temperature"}
+    readings = {k: v for k, v in readings.items() if k in allowed_reading_keys}
     payload_thresholds = thresholds or {}
     reading_meta = None
 
     # Fetch latest cleaned_data for device_id (prefer data_added desc, fallback to processed_at desc)
-    existing_nitrogen = readings.get("nitrogen")
     cleaned_res = (
         supabase.table("cleaned_data")
         .select(
@@ -463,7 +464,6 @@ def evaluate_status_threshold_core(
             "soil_moisture": cleaned_row.get("cleaned_soil_moisture")
             if cleaned_row.get("cleaned_soil_moisture") is not None
             else cleaned_row.get("soil_moisture"),
-            "nitrogen": existing_nitrogen,
         }
         reading_meta = {
             "device_id": cleaned_row.get("device_id", device_id),
@@ -486,7 +486,6 @@ def evaluate_status_threshold_core(
 
     soil_moisture_val = readings.get("soil_moisture")
     temperature_val = readings.get("temperature")
-    nitrogen_val = readings.get("nitrogen")
 
     soil_moisture_val = (
         float(soil_moisture_val) if soil_moisture_val is not None else None
@@ -494,29 +493,31 @@ def evaluate_status_threshold_core(
     temperature_val = (
         float(temperature_val) if temperature_val is not None else None
     )
-    nitrogen_val = float(nitrogen_val) if nitrogen_val is not None else None
 
     thresholds_used: Dict[str, float] = {}
     thresholds_source = "default"
     threshold_profile_name = None
-    relevant_threshold_keys = {
+    allowed_threshold_keys = {
         "soil_moisture_min",
         "soil_moisture_max",
         "soil_moisture_field_max",
         "temperature_min",
         "temperature_max",
-        "nitrogen_min",
-        "nitrogen_max",
-        "ph_min",
-        "ph_max",
+        "rain_mm_min",
+        "rain_mm_heavy",
+        "waterlogging_hours",
     }
     has_payload_thresholds = any(
         key in payload_thresholds and payload_thresholds[key] is not None
-        for key in relevant_threshold_keys
+        for key in allowed_threshold_keys
     )
 
     if payload_thresholds and has_payload_thresholds:
-        thresholds_used = {k: v for k, v in payload_thresholds.items() if v is not None}
+        thresholds_used = {
+            k: v
+            for k, v in payload_thresholds.items()
+            if k in allowed_threshold_keys and v is not None
+        }
         thresholds_source = "payload"
     else:
         db_thresholds, threshold_row = get_task_eval_thresholds_payload()
@@ -537,10 +538,9 @@ def evaluate_status_threshold_core(
 
     logger.info("Thresholds source=%s thresholds_used=%s", thresholds_source, thresholds_used)
     logger.info(
-        "Sensor values: soil_moisture=%s temperature=%s nitrogen=%s",
+        "Sensor values: soil_moisture=%s temperature=%s",
         soil_moisture_val,
         temperature_val,
-        nitrogen_val,
     )
 
     # 1) Load tasks for that plot + date
@@ -689,7 +689,6 @@ def evaluate_status_threshold_core(
         features = {
             "soil_moisture": float(soil_moisture_val if soil_moisture_val is not None else 0.0),
             "temperature": float(temperature_val if temperature_val is not None else 0.0),
-            "nitrogen": float(nitrogen_val if nitrogen_val is not None else 0.0),
             "rain_today": rain_today,
             "rain_next_3d": rain_next_3d,
             "task_type": str(t.get("type") or "").lower(),
@@ -709,6 +708,12 @@ def evaluate_status_threshold_core(
                 new_reason = _merge_reason(new_reason, f"AI predicted Stop (conf {ai_conf:.2f})")
 
         # Save update if changed
+        logger.info(
+            "Task %s decision=%s proposed_date=%s",
+            t.get("id"),
+            new_status,
+            new_proposed_date,
+        )
         updates.append((t["id"], new_status, new_reason, new_proposed_date))
 
     # 3) Apply updates to DB
