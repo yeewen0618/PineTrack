@@ -104,16 +104,16 @@ def generate_forecasts(days: int = 7, plot_id: str = None):
     if not df.empty and 'plot_id' in df.columns:
         default_plot_id = df['plot_id'].iloc[0]
     
-    # Keep device_id for backward compatibility
-    default_device_id = 1
-    if not df.empty and 'device_id' in df.columns:
-        default_device_id = int(df['device_id'].iloc[0])
+    # Keep plot_id for proper foreign key reference
+    default_plot_id = 1
+    if not df.empty and 'plot_id' in df.columns:
+        default_plot_id = int(df['plot_id'].iloc[0])
 
     for i, ts in enumerate(future_timestamps):
         entry = {
             "forecast_time": ts.isoformat(),
             "plot_id": default_plot_id,
-            "device_id": default_device_id,
+            "plot_id": default_plot_id,
             "created_at": pd.Timestamp.now().isoformat(),
             "temperature": float(forecast_results.get("temperature", [0]*len(future_timestamps))[i]),
             "soil_moisture": float(forecast_results.get("soil_moisture", [0]*len(future_timestamps))[i])
@@ -126,7 +126,7 @@ def generate_forecasts(days: int = 7, plot_id: str = None):
         try:
              # Upsert requires a UNIQUE constraint on the conflict column.
              # Since the user's table might not have it yet, we try INSERT to ensure data is saved.
-             # TODO: Recommended to add: ALTER TABLE predictions ADD CONSTRAINT unique_forecast UNIQUE (device_id, forecast_time);
+             # TODO: Recommended to add: ALTER TABLE predictions ADD CONSTRAINT unique_forecast UNIQUE (plot_id, forecast_time);
             
             # First, clean up any existing predictions for these times to avoid duplicates (Manual Upsert)
             # This is a bit safer than blindly inserting if we run this often.

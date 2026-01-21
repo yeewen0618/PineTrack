@@ -78,14 +78,22 @@ export function RescheduleCenterPage() {
       const weather = await safeFetch<WeatherItem[]>(getWeatherAnalytics(), []);
 
       const allTasksRes = await safeFetch(listTasks(), { ok: true, data: [] });
+      const today = new Date();
+      const todayStr = today.toISOString().slice(0, 10);
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-      const tasksForTomorrow = allTasksRes.data.filter((t) => t.task_date === tomorrowStr);
+      
+      // Include both today and tomorrow for suggestions (alignment with task evaluation)
+      const upcomingTasks = allTasksRes.data.filter((t) => 
+        t.task_date === todayStr || t.task_date === tomorrowStr
+      );
 
-      const weatherForecastForTomorrow = weather.filter((w) => {
+      const upcomingWeather = weather.filter((w) => {
         const dateStr = w.date || w.time;
-        return dateStr && dateStr.slice(0, 10) === tomorrowStr;
+        if (!dateStr) return false;
+        const wDate = dateStr.slice(0, 10);
+        return wDate === todayStr || wDate === tomorrowStr;
       });
 
       let sensorSummary = null;
@@ -101,8 +109,8 @@ export function RescheduleCenterPage() {
       let suggestions: InsightSuggestion[] = [];
       try {
         const result = await getWeatherRescheduleSuggestions(
-          tasksForTomorrow,
-          weatherForecastForTomorrow,
+          upcomingTasks,
+          upcomingWeather,
           sensorSummary,
         );
         suggestions = result.suggestions ?? [];

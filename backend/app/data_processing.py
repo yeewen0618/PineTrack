@@ -121,7 +121,7 @@ def data_processing_pipeline(plot_id=None):
     # --- SECTION 4: STEP 2 - DATA CLEANING (REPAIR) ---
     # We create a cleaned copy of the data
     # Drop exact duplicates (keeping the first occurrence)
-    df_raw = df_raw.drop_duplicates(subset=['data_added', 'device_id'], keep='first').reset_index(drop=True)
+    df_raw = df_raw.drop_duplicates(subset=['data_added', 'plot_id'], keep='first').reset_index(drop=True)
     
     df_cleaned = df_raw.copy()
     sensors = ['temperature', 'soil_moisture']
@@ -182,8 +182,8 @@ def data_processing_pipeline(plot_id=None):
         final_df[f'{s}_clean'] = final_df[s] # The current columns in df_cleaned are the cleaned ones
         final_df[f'{s}_raw'] = df_raw[s]     # We grab the original values from df_raw
     
-    # Ensure device_id is filled
-    final_df['device_id'] = final_df['device_id'].fillna(0)
+    # Ensure plot_id is filled
+    final_df['plot_id'] = final_df['plot_id'].fillna(0)
 
     # Calculate Quality Assessment on the FINAL Data (Using Raw Values)
     print("Running Quality Assessment on raw data...")
@@ -209,7 +209,7 @@ def data_processing_pipeline(plot_id=None):
             return val if pd.notnull(val) and not np.isinf(val) else None
 
         records.append({
-            "device_id": int(row['device_id']),
+            "plot_id": int(row['plot_id']),
             "data_added": row['data_added'].isoformat(),
             
             # RAW Data (Using the resampled raw values, so they align with the hour)

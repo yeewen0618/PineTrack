@@ -97,16 +97,16 @@ def _stable_start_index(plot_id: str, worker_count: int) -> int:
     return int(digest, 16) % worker_count
 
 
-def _load_sensor_summary(device_id: int) -> Dict[str, float]:
+def _load_sensor_summary(plot_id_for_sensor: int) -> Dict[str, float]:
     defaults = {"avg_n": 0.0, "avg_moisture": 0.0, "avg_temp": 0.0}
 
     cleaned_res = (
         supabase.table("cleaned_data")
         .select(
-            "device_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+            "plot_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
             "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
         )
-        .eq("device_id", device_id)
+        .eq("plot_id", plot_id_for_sensor)
         .order("data_added", desc=True)
         .limit(1)
         .execute()
@@ -117,10 +117,10 @@ def _load_sensor_summary(device_id: int) -> Dict[str, float]:
         fallback_res = (
             supabase.table("cleaned_data")
             .select(
-                "device_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+                "plot_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
                 "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
             )
-            .eq("device_id", device_id)
+            .eq("plot_id", plot_id_for_sensor)
             .order("processed_at", desc=True)
             .limit(1)
             .execute()
@@ -418,7 +418,7 @@ def generate_schedule(payload: GenerateScheduleRequest, user=Depends(get_current
 def evaluate_status_threshold_core(
     plot_id: str,
     target_date: date,
-    device_id: int = 205,
+    plot_id_for_sensor: int = None,
     reschedule_days: int = 2,
     readings: Optional[Dict[str, float]] = None,
     thresholds: Optional[Dict[str, float]] = None,
@@ -427,14 +427,18 @@ def evaluate_status_threshold_core(
     payload_thresholds = thresholds or {}
     reading_meta = None
 
-    # Fetch latest cleaned_data for device_id (prefer data_added desc, fallback to processed_at desc)
+    # Use plot_id as sensor identifier if not explicitly provided
+    if plot_id_for_sensor is None:
+        plot_id_for_sensor = plot_id
+    
+    # Fetch latest cleaned_data for plot_id (prefer data_added desc, fallback to processed_at desc)
     cleaned_res = (
         supabase.table("cleaned_data")
         .select(
-            "device_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+            "plot_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
             "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
         )
-        .eq("device_id", device_id)
+        .eq("plot_id", plot_id_for_sensor)
         .order("data_added", desc=True)
         .limit(1)
         .execute()
@@ -445,10 +449,10 @@ def evaluate_status_threshold_core(
         fallback_res = (
             supabase.table("cleaned_data")
             .select(
-                "device_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+                "plot_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
                 "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
             )
-            .eq("device_id", device_id)
+            .eq("plot_id", plot_id_for_sensor)
             .order("processed_at", desc=True)
             .limit(1)
             .execute()
@@ -456,7 +460,7 @@ def evaluate_status_threshold_core(
         cleaned_row = (fallback_res.data or [None])[0] or cleaned_row
 
     if cleaned_row:
-        logger.info("DEBUG: cleaned_data query device_id=%s", device_id)
+        logger.info("DEBUG: cleaned_data query plot_id=%s", plot_id_for_sensor)
         logger.info("SUCCESS: Sensor data fetched: %s", cleaned_row)
         readings = {
             "temperature": cleaned_row.get("cleaned_temperature")
@@ -470,22 +474,22 @@ def evaluate_status_threshold_core(
             else cleaned_row.get("nitrogen"),
         }
         reading_meta = {
-            "device_id": cleaned_row.get("device_id", device_id),
+            "plot_id": cleaned_row.get("plot_id", plot_id_for_sensor),
             "timestamp": cleaned_row.get("data_added") or cleaned_row.get("processed_at"),
         }
     else:
-        logger.warning("WARNING: No sensor data found for device_id = %s", device_id)
-        logger.info("DEBUG: cleaned_data query device_id=%s", device_id)
+        logger.warning("WARNING: No sensor data found for plot_id = %s", plot_id_for_sensor)
+        logger.info("DEBUG: cleaned_data query plot_id=%s", plot_id_for_sensor)
         logger.info("DEBUG: cleaned_data row fetched: %s", cleaned_row)
         if readings:
             reading_meta = {
-                "device_id": device_id,
+                "plot_id": plot_id_for_sensor,
                 "timestamp": None,
             }
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"No cleaned_data found for device_id={device_id} and no readings provided",
+                detail=f"No cleaned_data found for plot_id={plot_id_for_sensor} and no readings provided",
             )
 
     soil_moisture_val = readings.get("soil_moisture")
@@ -686,7 +690,7 @@ def evaluate_status_threshold_core(
         "plot_id": plot_id,
         "date": target_date.isoformat(),
         "updated": updated,
-        "reading_device_id": reading_meta.get("device_id") if reading_meta else None,
+        "reading_plot_id": reading_meta.get("plot_id") if reading_meta else None,
         "reading_timestamp": reading_meta.get("timestamp") if reading_meta else None,
     }
 
@@ -695,7 +699,7 @@ def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depe
     return evaluate_status_threshold_core(
         plot_id=payload.plot_id,
         target_date=payload.date,
-        device_id=payload.device_id or 205,
+        plot_id_for_sensor=payload.sensor_plot_id,
         reschedule_days=payload.reschedule_days,
         readings=payload.readings,
         thresholds=payload.thresholds,
@@ -720,8 +724,9 @@ def get_insights(payload: InsightsRequest, user=Depends(get_current_user)):
     if not tasks:
         return {"suggestions": []}
 
-    device_id = 205
-    sensor_summary = _load_sensor_summary(device_id)
+    # Get sensor data for the first task's plot
+    first_plot_id = tasks_res.data[0]['plot_id'] if tasks_res.data else 205
+    sensor_summary = _load_sensor_summary(first_plot_id)
 
     weather_forecast = payload.weather_forecast
     if weather_forecast is None:

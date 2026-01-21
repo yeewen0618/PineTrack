@@ -9,6 +9,7 @@ import pandas as pd
 
 from app.ai_inference import predict_delay_days
 from app.routers.suggestions import generate_insight_recommendations
+from app.services.task_eval_threshold_service import get_task_eval_thresholds_payload, TASK_EVAL_DEFAULTS
 
 logger = logging.getLogger(__name__)
 
@@ -168,8 +169,13 @@ def get_insights_with_real_dates(
     weather_df = normalize_weather_df(weather_forecast or [])
     calendar = build_daily_rain_calendar(weather_df)
 
+    # Load thresholds from database
+    task_thresholds, _ = get_task_eval_thresholds_payload()
+    if not task_thresholds:
+        task_thresholds = TASK_EVAL_DEFAULTS
+
     try:
-        recs = generate_insight_recommendations(tasks, weather_df, sensor_summary)
+        recs = generate_insight_recommendations(tasks, weather_df, sensor_summary, task_thresholds)
     except Exception:
         logger.exception("Failed to generate insight recommendations")
         return []

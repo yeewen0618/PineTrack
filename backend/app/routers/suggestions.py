@@ -12,6 +12,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from app.core.supabase_client import supabase
 from app.data_processing import get_thresholds
+from app.services.task_eval_threshold_service import get_task_eval_thresholds_payload, TASK_EVAL_DEFAULTS
 
 # ============================================================================
 # API Router Configuration
@@ -180,9 +181,17 @@ def get_weather_reschedule_suggestions(payload: RescheduleRequest):
                  weather_df['datetime'] = pd.to_datetime(weather_df['date'])
         
         # ============================================================
-        # STEP 2: Generate Recommendations
+        # STEP 2: Load Task Evaluation Thresholds from Database
         # ============================================================
-        suggestions = generate_insight_recommendations(tasks, weather_df, sensor_data)
+        task_thresholds, _ = get_task_eval_thresholds_payload()
+        # Fallback to defaults if DB returns empty
+        if not task_thresholds:
+            task_thresholds = TASK_EVAL_DEFAULTS
+        
+        # ============================================================
+        # STEP 3: Generate Recommendations
+        # ============================================================
+        suggestions = generate_insight_recommendations(tasks, weather_df, sensor_data, task_thresholds)
         return {"suggestions": suggestions}
 
     except Exception as e:
@@ -196,13 +205,14 @@ def get_weather_reschedule_suggestions(payload: RescheduleRequest):
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# Configuration Constants: Thresholds and Task Categories
+# Configuration Constants: Task Categories
+# NOTE: Threshold values now loaded from task_eval_thresholds table in DB
 # ----------------------------------------------------------------------------
 
-# RULE 1: Rain Prevention Thresholds
-CLEAR_SKIES_THRESHOLD = 1.0   # mm - Less than 1mm = clear skies
-RAIN_THRESHOLD = 2.0          # mm - More than 2mm = rainy weather
-HEAVY_RAIN_THRESHOLD = 10.0   # mm - More than 10mm = heavy rain
+# RULE 1: Rain Prevention - Thresholds loaded from DB
+# Default fallback values (used only if DB query fails):
+# rain_mm_min = 2.0 mm (rainy weather threshold)
+# rain_mm_heavy = 10.0 mm (heavy rain threshold)
 
 # Tasks sensitive to rain (can be washed away or become ineffective)
 RAIN_SENSITIVE_TYPES = [
@@ -212,11 +222,10 @@ RAIN_SENSITIVE_TYPES = [
     'land-prep'       # Land preparation requires dry soil for proper work
 ]
 
-# RULE 2: Soil Moisture Management
-DRY_SOIL_THRESHOLD = 15.0       # % - Below 15% = dry soil
-OPTIMAL_MOISTURE_MIN = 15.0     # % - 15% = optimal range start
-OPTIMAL_MOISTURE_MAX = 25.0     # % - 25% = optimal range end
-WATERLOGGING_THRESHOLD = 25.0   # % - Above 25% for 24h = waterlogging risk
+# RULE 2: Soil Moisture Management - Thresholds loaded from DB
+# Default fallback values (used only if DB query fails):
+# soil_moisture_min = 15.0% (dry soil threshold)
+# soil_moisture_max = 25.0% (waterlogging threshold)
 
 # Tasks affected by excessive soil moisture
 MOISTURE_SENSITIVE_TYPES = [
@@ -226,11 +235,10 @@ MOISTURE_SENSITIVE_TYPES = [
     'land-prep'   # Machinery can get stuck in wet soil
 ]
 
-# RULE 3: Temperature Management
-COLD_STRESS_THRESHOLD = 20.0     # °C - Below 20°C = cold stress
-OPTIMAL_TEMP_MIN = 20.0          # °C - 20°C = optimal range start
-OPTIMAL_TEMP_MAX = 35.0          # °C - 35°C = optimal range end
-HEAT_STRESS_THRESHOLD = 35.0     # °C - Above 35°C = heat stress
+# RULE 3: Temperature Management - Thresholds loaded from DB
+# Default fallback values (used only if DB query fails):
+# temperature_min = 22.0°C (cold stress threshold)
+# temperature_max = 32.0°C (heat stress threshold)
 
 # Tasks sensitive to high temperature
 HEAT_SENSITIVE_TYPES = [
@@ -248,7 +256,7 @@ FLOWER_INDUCTION_CODES = ['TPL_FLOWER_INDUCTION', 'FLOWER_INDUCTION']
 # Main Recommendation Generation Function
 # ----------------------------------------------------------------------------
 
-def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, sensor_summary):
+def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, sensor_summary, thresholds=None):
     """
     Core Intelligence Engine: Generates recommendations based on multiple rules
     
@@ -260,10 +268,30 @@ def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, senso
         scheduled_tasks: List of tasks with scheduling information
         weather_forecast_df: DataFrame containing weather predictions
         sensor_summary: Current sensor readings from the field
+        thresholds: Dict of threshold values from task_eval_thresholds table
     
     Returns:
         List of recommendation dictionaries with detailed reasoning
     """
+    # Use provided thresholds or fallback to defaults
+    if not thresholds:
+        thresholds = TASK_EVAL_DEFAULTS
+    
+    # Extract threshold values
+    RAIN_THRESHOLD = thresholds.get('rain_mm_min', 2.0)
+    HEAVY_RAIN_THRESHOLD = thresholds.get('rain_mm_heavy', 10.0)
+    DRY_SOIL_THRESHOLD = thresholds.get('soil_moisture_min', 15.0)
+    WATERLOGGING_THRESHOLD = thresholds.get('soil_moisture_max', 25.0)
+    COLD_STRESS_THRESHOLD = thresholds.get('temperature_min', 22.0)
+    HEAT_STRESS_THRESHOLD = thresholds.get('temperature_max', 32.0)
+    
+    # Additional constants not in DB
+    CLEAR_SKIES_THRESHOLD = 1.0  # mm - Less than 1mm = clear skies
+    OPTIMAL_MOISTURE_MIN = DRY_SOIL_THRESHOLD  # Use same as dry threshold
+    OPTIMAL_MOISTURE_MAX = WATERLOGGING_THRESHOLD  # Use same as waterlogging threshold
+    OPTIMAL_TEMP_MIN = COLD_STRESS_THRESHOLD  # Use same as cold threshold
+    OPTIMAL_TEMP_MAX = HEAT_STRESS_THRESHOLD  # Use same as heat threshold
+    
     recommendations = []
     
     # ============================================================

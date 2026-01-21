@@ -44,7 +44,7 @@ def _scheduler_enabled() -> bool:
 
 def _fetch_plots_for_evaluation():
     try:
-        response = supabase.table("plots").select("id, device_id").execute()
+        response = supabase.table("plots").select("id").execute()
         return response.data or []
     except APIError:
         response = supabase.table("plots").select("id").execute()
@@ -62,12 +62,11 @@ def _run_scheduled_task_evaluation():
         plot_id = plot.get("id")
         if not plot_id:
             continue
-        device_id = plot.get("device_id") or 205
         try:
             result = schedule.evaluate_status_threshold_core(
                 plot_id=plot_id,
                 target_date=today,
-                device_id=device_id,
+                plot_id_for_sensor=plot_id,
                 reschedule_days=2,
             )
             total_updated += int(result.get("updated", 0) or 0)
