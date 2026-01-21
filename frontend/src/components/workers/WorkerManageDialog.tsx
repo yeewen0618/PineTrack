@@ -5,22 +5,13 @@ import { Button } from "../ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "../ui/alert-dialog";
+import { AlertTriangle } from "lucide-react";
 import type { Plot, Task, Worker } from "../../lib/api";
 import { deleteWorker, updateTaskAssignment, updateWorker } from "../../lib/api";
 
@@ -41,10 +32,6 @@ const ROLE_OPTIONS = [
   "Soil Specialist",
   "Irrigation Technician",
 ];
-
-function isNotFoundError(err: unknown) {
-  return err instanceof Error && /404|not found/i.test(err.message);
-}
 
 function getWorkerInitials(name: string) {
   return name
@@ -71,6 +58,9 @@ export function WorkerManageDialog({
   const [formContact, setFormContact] = useState("");
   const [formStatus, setFormStatus] = useState("active");
   const [selectedTaskId, setSelectedTaskId] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const todayStr = useMemo(() => {
     const today = new Date();
@@ -113,10 +103,15 @@ export function WorkerManageDialog({
     setFormStatus(worker.is_active ? "active" : "inactive");
     setIsEditing(false);
     setSelectedTaskId("");
+    setShowDeleteConfirm(false);
   }, [worker, open]);
 
   const handleSave = async () => {
     if (!worker) return;
+    if (!formName.trim()) {
+      toast.error("Worker name is required.");
+      return;
+    }
     const payload = {
       name: formName.trim() || worker.name,
       role: formRole,
@@ -125,20 +120,16 @@ export function WorkerManageDialog({
     };
 
     try {
+      setIsSaving(true);
       const res = await updateWorker(worker.id, payload);
       onUpdated(res.data);
       setIsEditing(false);
       toast.success("Worker updated.");
     } catch (err) {
-      if (isNotFoundError(err)) {
-        const fallbackWorker = { ...worker, ...payload };
-        onUpdated(fallbackWorker);
-        setIsEditing(false);
-        toast.warning("Worker updated locally (API missing).");
-        return;
-      }
       const message = err instanceof Error ? err.message : "Failed to update worker.";
       toast.error(message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -150,19 +141,16 @@ export function WorkerManageDialog({
     }
 
     try {
+      setIsDeleting(true);
       await deleteWorker(worker.id);
       onDeleted(worker.id);
       onOpenChange(false);
       toast.success("Worker deleted.");
     } catch (err) {
-      if (isNotFoundError(err)) {
-        onDeleted(worker.id);
-        onOpenChange(false);
-        toast.warning("Worker deleted locally (API missing).");
-        return;
-      }
       const message = err instanceof Error ? err.message : "Failed to delete worker.";
       toast.error(message);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -190,17 +178,6 @@ export function WorkerManageDialog({
       setSelectedTaskId("");
       toast.success("Task assigned.");
     } catch (err) {
-      if (isNotFoundError(err)) {
-        const fallbackTask: Task = {
-          ...selectedTask,
-          assigned_worker_id: worker.id,
-          assigned_worker_name: worker.name,
-        };
-        onTaskUpdated(fallbackTask);
-        setSelectedTaskId("");
-        toast.warning("Task assignment saved locally (API missing).");
-        return;
-      }
       const message = err instanceof Error ? err.message : "Failed to assign task.";
       toast.error(message);
     }
@@ -213,6 +190,7 @@ export function WorkerManageDialog({
       <DialogContent className="rounded-2xl sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Worker Details</DialogTitle>
+          <DialogDescription>View and manage worker profile information.</DialogDescription>
         </DialogHeader>
 
         <div className="flex items-center gap-3">
@@ -278,13 +256,15 @@ export function WorkerManageDialog({
                 <Button
                   className="bg-[#16A34A] hover:bg-[#15803D] rounded-xl"
                   onClick={handleSave}
+                  disabled={isSaving}
                 >
-                  Save
+                  {isSaving ? "Saving..." : "Save"}
                 </Button>
                 <Button
                   variant="outline"
                   className="rounded-xl"
                   onClick={() => setIsEditing(false)}
+                  disabled={isSaving}
                 >
                   Cancel
                 </Button>
@@ -308,38 +288,53 @@ export function WorkerManageDialog({
                   </p>
                 </div>
               )}
-              <div className="flex flex-wrap gap-3">
-                <Button variant="outline" className="rounded-xl" onClick={() => setIsEditing(true)}>
-                  Edit Worker
-                </Button>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="rounded-xl text-[#DC2626] border-[#DC2626] hover:bg-red-50 hover:text-[#991B1B]"
-                      disabled={activeWorkerTasks.length > 0}
-                    >
-                      Delete Worker
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent className="rounded-2xl">
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete worker?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Are you sure you want to delete this worker? This action cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel className="rounded-xl">Cancel</AlertDialogCancel>
-                      <AlertDialogAction
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-3">
+                  <Button variant="outline" className="rounded-xl" onClick={() => setIsEditing(true)}>
+                    Edit Worker
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="rounded-xl text-[#DC2626] border-[#DC2626] hover:bg-red-50 hover:text-[#991B1B]"
+                    disabled={activeWorkerTasks.length > 0 || isDeleting}
+                    onClick={() => setShowDeleteConfirm((prev) => !prev)}
+                  >
+                    Delete Worker
+                  </Button>
+                </div>
+
+                {showDeleteConfirm && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-3 space-y-3">
+                    <div className="flex items-start gap-2">
+                      <div className="mt-0.5 text-[#B91C1C]">
+                        <AlertTriangle size={16} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-[#7F1D1D]">Delete worker?</p>
+                        <p className="text-xs text-[#991B1B]">
+                          This action cannot be undone.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        className="rounded-xl"
+                        onClick={() => setShowDeleteConfirm(false)}
+                        disabled={isDeleting}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
                         className="rounded-xl bg-[#DC2626] hover:bg-[#B91C1C]"
                         onClick={handleDelete}
+                        disabled={isDeleting}
                       >
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                        {isDeleting ? "Deleting..." : "Delete"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
               {activeWorkerTasks.length > 0 && (
                 <p className="text-xs text-[#DC2626]">

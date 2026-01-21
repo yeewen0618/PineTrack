@@ -14,7 +14,7 @@ import {
 } from '../components/ui/dialog';
 import { Plus, Search, Phone, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { listPlots, listTasks, listWorkers } from "../lib/api";
+import { createWorker, listPlots, listTasks, listWorkers } from "../lib/api";
 import type { Plot, Task, Worker } from "../lib/api";
 import { WorkerManageDialog } from "../components/workers/WorkerManageDialog";
 
@@ -24,8 +24,11 @@ export function WorkersPage() {
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [plots, setPlots] = useState<Plot[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [selectedWorker, setSelectedWorker] = useState<Worker | null>(null);
   const [manageDialogOpen, setManageDialogOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     role: 'Field Worker',
@@ -35,6 +38,8 @@ export function WorkersPage() {
   useEffect(() => {
     const load = async () => {
       // Load workers, plots, and tasks from the backend (no mock data).
+      setLoading(true);
+      setError(null);
       try {
         const [workersRes, plotsRes, tasksRes] = await Promise.all([
           listWorkers(),
@@ -45,9 +50,11 @@ export function WorkersPage() {
         setPlots(plotsRes.data ?? []);
         setTasks(tasksRes.data ?? []);
       } catch (err: Error | unknown) {
-        toast.error(err instanceof Error ? err.message : "Failed to load workers data");
+        const message = err instanceof Error ? err.message : "Failed to load workers data";
+        setError(message);
+        toast.error(message);
       } finally {
-        // no-op: keep rendering current data
+        setLoading(false);
       }
     };
 
@@ -98,11 +105,36 @@ export function WorkersPage() {
     setTasks((prev) => prev.map((task) => (task.id === updatedTask.id ? updatedTask : task)));
   };
 
-  const handleAddWorker = (e: React.FormEvent) => {
+  const handleAddWorker = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success('Worker added successfully');
-    setIsAddDialogOpen(false);
-    setFormData({ name: '', role: 'Field Worker', contact: '' });
+    const trimmedName = formData.name.trim();
+    if (!trimmedName) {
+      const message = "Worker name is required.";
+      setError(message);
+      toast.error(message);
+      return;
+    }
+
+    setIsCreating(true);
+    setError(null);
+    try {
+      const res = await createWorker({
+        name: trimmedName,
+        role: formData.role,
+        contact: formData.contact.trim() || null,
+        is_active: true,
+      });
+      setWorkers((prev) => [res.data, ...prev]);
+      toast.success("Worker added successfully");
+      setIsAddDialogOpen(false);
+      setFormData({ name: '', role: 'Field Worker', contact: '' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to add worker.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const getWorkerInitials = (name: string) => {
@@ -182,11 +214,16 @@ export function WorkersPage() {
                   variant="outline"
                   className="flex-1 rounded-xl"
                   onClick={() => setIsAddDialogOpen(false)}
+                  disabled={isCreating}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" className="flex-1 bg-[#16A34A] hover:bg-[#16A34A] rounded-xl">
-                  Add Worker
+                <Button
+                  type="submit"
+                  className="flex-1 bg-[#16A34A] hover:bg-[#16A34A] rounded-xl"
+                  disabled={isCreating}
+                >
+                  {isCreating ? 'Saving...' : 'Add Worker'}
                 </Button>
               </div>
             </form>
@@ -231,6 +268,17 @@ export function WorkersPage() {
           />
         </div>
       </Card>
+
+      {loading && (
+        <Card className="p-3 rounded-2xl bg-white text-sm text-[#6B7280]">
+          Loading workers...
+        </Card>
+      )}
+      {error && !loading && (
+        <Card className="p-3 rounded-2xl bg-red-50 text-sm text-[#991B1B] border border-red-200">
+          {error}
+        </Card>
+      )}
 
       {/* Workers Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

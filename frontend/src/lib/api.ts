@@ -18,10 +18,9 @@ export async function getWeatherRescheduleSuggestions(
 }
 // src/lib/api.ts
 
-const API_BASE =
-  import.meta.env.VITE_API_URL ??
-  import.meta.env.VITE_API_BASE ??
-  "http://127.0.0.1:5001";
+const API_BASE = import.meta.env.DEV
+  ? ""
+  : (import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE ?? "");
 
 type ApiFetchOptions = RequestInit & {
   skipAuthRedirect?: boolean;
@@ -260,6 +259,23 @@ export async function listWorkers() {
   const normalized = (res.data ?? []).map((worker) => normalizeWorker(worker));
 
   return { ...res, data: normalized };
+}
+
+export async function getWorkers() {
+  return listWorkers();
+}
+
+export async function createWorker(payload: {
+  name: string;
+  role?: string | null;
+  contact?: string | null;
+  is_active?: boolean | null;
+}) {
+  const res = await apiFetch<{ ok: true; data: Worker }>(`/api/workers`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return { ...res, data: normalizeWorker(res.data) };
 }
 
 export async function updateWorker(
