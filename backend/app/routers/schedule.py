@@ -20,10 +20,18 @@ from app.reschedule_engine import (
 from app.weather_service import fetch_weather_data
 from app.schemas.schedule import GenerateScheduleRequest, EvaluateThresholdStatusRequest
 from app.services.task_eval_threshold_service import TASK_EVAL_DEFAULTS, get_task_eval_thresholds_payload
+from app.services.task_conflict_service import (
+    DEFAULT_HORMONE_BUFFER_DAYS,
+    apply_fertiliser_conflict_resolution,
+    is_fertiliser_task,
+)
 
 router = APIRouter(prefix="/api/schedule", tags=["Schedule"])
 logger = logging.getLogger(__name__)
 MAX_LOOKAHEAD_DAYS = 7
+FERTILISER_HORMONE_CONFLICT_REASON = (
+    "Avoid fertiliser application near hormone application (buffer 7 days)."
+)
 
 
 class InsightsRequest(BaseModel):
@@ -221,6 +229,55 @@ def _merge_reason(existing: Optional[str], addition: Optional[str]) -> Optional[
     return None
 
 
+def _fetch_plot_tasks_for_conflict_check(
+    plot_id: str,
+    date_from: date,
+    date_to: date,
+) -> List[Dict[str, Any]]:
+    res = (
+        supabase.table("tasks")
+        .select("id, plot_id, title, type, task_date, status, reason, original_date, proposed_date")
+        .eq("plot_id", plot_id)
+        .gte("task_date", date_from.isoformat())
+        .lte("task_date", date_to.isoformat())
+        .execute()
+    )
+    return res.data or []
+
+
+def _adjust_proposed_date_for_conflict(
+    plot_id: str,
+    task: Dict[str, Any],
+    proposed_date: Optional[str],
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    if not proposed_date:
+        return proposed_date, task.get("reason"), task.get("status")
+    if not is_fertiliser_task(task):
+        return proposed_date, task.get("reason"), task.get("status")
+
+    candidate = _parse_date_value(proposed_date)
+    date_from = candidate - timedelta(days=DEFAULT_HORMONE_BUFFER_DAYS)
+    date_to = candidate + timedelta(days=DEFAULT_HORMONE_BUFFER_DAYS)
+    existing_tasks = _fetch_plot_tasks_for_conflict_check(plot_id, date_from, date_to)
+
+    temp_task = {
+        **task,
+        "task_date": candidate.isoformat(),
+    }
+    all_tasks = existing_tasks + [temp_task]
+
+    updated = apply_fertiliser_conflict_resolution(
+        [temp_task],
+        all_tasks,
+        reason=FERTILISER_HORMONE_CONFLICT_REASON,
+        shift_task_date=False,
+    )
+    if not updated:
+        return proposed_date, task.get("reason"), task.get("status")
+
+    return temp_task.get("proposed_date"), temp_task.get("reason"), temp_task.get("status")
+
+
 def _apply_insight_reschedules(tasks: List[Dict[str, Any]], suggestions: List[Dict[str, Any]]) -> int:
     task_by_id = {t.get("id"): t for t in tasks if t.get("id")}
     updated = 0
@@ -250,12 +307,21 @@ def _apply_insight_reschedules(tasks: List[Dict[str, Any]], suggestions: List[Di
         if task.get("proposed_date") == suggested_date:
             continue
 
+        merged_reason = _merge_reason(task.get("reason"), rec.get("reason"))
+        adjusted_date, adjusted_reason, adjusted_status = _adjust_proposed_date_for_conflict(
+            task.get("plot_id") or "",
+            {**task, "reason": merged_reason, "status": task.get("status")},
+            suggested_date,
+        )
+
         update_payload: Dict[str, Any] = {
-            "proposed_date": suggested_date,
-            "reason": _merge_reason(task.get("reason"), rec.get("reason")),
+            "proposed_date": adjusted_date,
+            "reason": adjusted_reason,
         }
         if not task.get("original_date"):
             update_payload["original_date"] = task.get("task_date")
+        if adjusted_status and adjusted_status != task.get("status"):
+            update_payload["status"] = adjusted_status
 
         supabase.table("tasks").update(update_payload).eq("id", task_id).execute()
         updated += 1
@@ -329,6 +395,11 @@ def generate_schedule_for_plot(
         tpl_dates = _dates_for_template(start_date, tpl, horizon_days=horizon_days)
 
         for d in tpl_dates:
+            buffer_days = (
+                tpl.get("buffer_days")
+                if isinstance(tpl, dict) and tpl.get("buffer_days") is not None
+                else DEFAULT_HORMONE_BUFFER_DAYS
+            )
             tasks_to_insert.append({
                 "id": f"TASK_{uuid4().hex[:8].upper()}",
                 "plot_id": plot_id,
@@ -342,6 +413,7 @@ def generate_schedule_for_plot(
                 "original_date": d.isoformat(),
                 "proposed_date": None,
                 "reason": "Auto-generated from task template",
+                "buffer_days": buffer_days,
             })
 
     if not tasks_to_insert:
@@ -351,6 +423,39 @@ def generate_schedule_for_plot(
             "start_date": start_date.isoformat(),
             "tasks_created": 0
         }
+
+    # 3.4) Resolve hormone vs fertiliser conflicts (new + existing tasks)
+    end_date = start_date + timedelta(days=horizon_days + DEFAULT_HORMONE_BUFFER_DAYS)
+    date_from = start_date - timedelta(days=DEFAULT_HORMONE_BUFFER_DAYS)
+    existing_tasks = _fetch_plot_tasks_for_conflict_check(plot_id, date_from, end_date)
+    all_tasks_for_conflict = existing_tasks + tasks_to_insert
+
+    apply_fertiliser_conflict_resolution(
+        tasks_to_insert,
+        all_tasks_for_conflict,
+        reason=FERTILISER_HORMONE_CONFLICT_REASON,
+        shift_task_date=True,
+    )
+
+    existing_conflicts = apply_fertiliser_conflict_resolution(
+        existing_tasks,
+        all_tasks_for_conflict,
+        reason=FERTILISER_HORMONE_CONFLICT_REASON,
+        shift_task_date=True,
+    )
+
+    for task in existing_conflicts:
+        task_id = task.get("id")
+        if not task_id:
+            continue
+        update_payload = {
+            "task_date": task.get("task_date"),
+            "proposed_date": task.get("proposed_date"),
+            "status": task.get("status"),
+            "reason": task.get("reason"),
+            "original_date": task.get("original_date"),
+        }
+        supabase.table("tasks").update(update_payload).eq("id", task_id).execute()
 
     # 3.5) Auto-assign workers (round-robin across all active field workers)
     active_workers = _fetch_active_workers()
@@ -382,7 +487,11 @@ def generate_schedule_for_plot(
             selected["id"],
         )
 
-    # 4) Insert
+    # 4) Remove conflict-only metadata before insert
+    for task in tasks_to_insert:
+        task.pop("buffer_days", None)
+
+    # 5) Insert
     try:
         insert_res = supabase.table("tasks").insert(tasks_to_insert).execute()
     except APIError as e:
@@ -685,6 +794,22 @@ def evaluate_status_threshold_core(
                     f"Pending: {reason_detail}{profile_suffix}. {reschedule_reason}"
                 )
                 new_proposed_date = proposed_date.isoformat()
+
+        if new_status == "Pending" and new_proposed_date:
+            adjusted_date, adjusted_reason, adjusted_status = _adjust_proposed_date_for_conflict(
+                plot_id,
+                {
+                    "plot_id": plot_id,
+                    "title": t.get("title"),
+                    "type": t.get("type"),
+                    "status": new_status,
+                    "reason": new_reason,
+                },
+                new_proposed_date,
+            )
+            new_proposed_date = adjusted_date
+            new_reason = adjusted_reason or new_reason
+            new_status = adjusted_status or new_status
 
         features = {
             "soil_moisture": float(soil_moisture_val if soil_moisture_val is not None else 0.0),

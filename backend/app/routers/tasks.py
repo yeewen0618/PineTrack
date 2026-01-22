@@ -53,20 +53,28 @@ def list_tasks(
     elif has_proposed is False:
         q = q.is_("proposed_date", "null")
 
-    res = q.order("task_date").execute()
+    try:
+        res = q.order("task_date").execute()
+    except APIError as e:
+        message = e.args[0].get("message", str(e))
+        raise HTTPException(status_code=500, detail=message)
     return {"ok": True, "data": res.data or []}
 
 
 @router.get("/reschedule-proposals")
 def reschedule_proposals(user=Depends(get_current_user)):
     """Return tasks that have proposed_date set (pending approval)."""
-    res = (
-        supabase.table("tasks")
-        .select("*")
-        .not_.is_("proposed_date", "null")
-        .order("task_date")
-        .execute()
-    )
+    try:
+        res = (
+            supabase.table("tasks")
+            .select("*")
+            .not_.is_("proposed_date", "null")
+            .order("task_date")
+            .execute()
+        )
+    except APIError as e:
+        message = e.args[0].get("message", str(e))
+        raise HTTPException(status_code=500, detail=message)
     return {"ok": True, "data": res.data or []}
 
 

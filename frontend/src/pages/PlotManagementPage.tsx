@@ -91,6 +91,14 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
     loadPlots();
   }, []);
 
+  useEffect(() => {
+    const handler = () => {
+      loadPlots();
+    };
+    window.addEventListener("tasks:refresh", handler);
+    return () => window.removeEventListener("tasks:refresh", handler);
+  }, []);
+
   const filteredPlots = useMemo(() => {
     return plots.filter(
       (plot) =>
