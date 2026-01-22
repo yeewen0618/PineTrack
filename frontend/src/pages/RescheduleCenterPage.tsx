@@ -144,6 +144,7 @@ export function RescheduleCenterPage() {
       await approveReschedule(taskId);
       toast.success('Reschedule approved and applied');
       loadData();
+      window.dispatchEvent(new Event('tasks:refresh'));
     } catch (e) {
       toast.error((e as Error).message ?? 'Approve failed');
     }
@@ -154,6 +155,7 @@ export function RescheduleCenterPage() {
       await rejectReschedule(taskId);
       toast.success('Reschedule rejected - original date maintained');
       loadData();
+      window.dispatchEvent(new Event('tasks:refresh'));
     } catch (e) {
       toast.error((e as Error).message ?? 'Reject failed');
     }
@@ -178,7 +180,7 @@ export function RescheduleCenterPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card className="p-5 rounded-2xl bg-white shadow-sm">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 bg-[#DC2626]/10 rounded-xl flex items-center justify-center">
@@ -207,19 +209,6 @@ export function RescheduleCenterPage() {
             </div>
           </div>
           <p className="text-[14px] text-[#6B7280]">Tasks delayed for optimal conditions</p>
-        </Card>
-
-        <Card className="p-5 rounded-2xl bg-white shadow-sm">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-[#2563EB]/10 rounded-xl flex items-center justify-center">
-              <CheckCircle2 className="text-[#2563EB]" size={20} />
-            </div>
-            <div>
-              <p className="text-[14px] text-[#6B7280]">Avg Delay</p>
-              <p className="text-[20px] text-[#111827]">3.2 days</p>
-            </div>
-          </div>
-          <p className="text-[14px] text-[#6B7280]">Average rescheduling period</p>
         </Card>
       </div>
 

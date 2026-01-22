@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { Card } from '../components/ui/card';
 import { WeatherCard } from '../components/WeatherCard';
 import { PlotCard } from '../components/PlotCard';
@@ -8,11 +10,12 @@ import { toast } from 'sonner';
 
 import { calcHarvestProgressPercent } from '../lib/progress';
 import { sortPlotsById } from '../lib/sortPlots';
+import { getPlotStatusFromTasks } from '../lib/plotStatus';
 import { InsightRecommendationsCard } from '../components/insights/InsightRecommendationsCard';
 
 // ✅ Use real API
-import { listPlots, listTasks, getDashboardWeather, getAnalyticsHistory, getWeatherAnalytics, getWeatherRescheduleSuggestions } from '../lib/api';
-import type { Plot } from '../lib/api';
+import { getDashboardStats, getDashboardWeather, getAnalyticsHistory, getPendingRescheduleApprovals, getWeatherAnalytics, getWeatherRescheduleSuggestions } from '../lib/api';
+import type { Plot, Task, Worker } from '../lib/api';
 
 // Weather types (aligned with backend response)
 interface CurrentWeather {
@@ -55,10 +58,44 @@ type TaskVM = {
   proposed_date?: string | null;
 };
 
+type StatCardProps = {
+  label: string;
+  value: number;
+  icon: ReactNode;
+  to: string;
+};
+
+function StatCard({ label, value, icon, to }: StatCardProps) {
+  return (
+    <Link
+      to={to}
+      className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#16A34A] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F9FAFB]"
+      aria-label={`View ${label}`}
+    >
+      <Card className="min-h-[96px] p-5 rounded-2xl bg-white transition-all duration-150 cursor-pointer group-hover:shadow-md group-hover:-translate-y-0.5 group-active:translate-y-0 group-active:shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm text-[#6B7280] mb-1">{label}</p>
+            <p className="text-3xl text-[#111827] font-semibold tabular-nums">
+              {value}
+            </p>
+          </div>
+          <div className="text-4xl w-12 h-12 flex items-center justify-center leading-none">
+            {icon}
+          </div>
+        </div>
+      </Card>
+    </Link>
+  );
+}
+
 
 export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const [plots, setPlots] = useState<Plot[]>([]);
+  const [rawTasks, setRawTasks] = useState<Task[]>([]);
   const [tasks, setTasks] = useState<TaskVM[]>([]);
+  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [pendingRescheduleApprovals, setPendingRescheduleApprovals] = useState<Task[]>([]);
   const [weather, setWeather] = useState<CurrentWeather | null>(null);
   const [forecast, setForecast] = useState<ForecastDay[]>([]);
   const [weatherSuggestions, setWeatherSuggestions] = useState<Suggestion[]>([]);
@@ -73,17 +110,22 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     return d.toISOString().slice(0, 10);
   }, []);
 
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      // 1) Load plots
-      const plotsRes = await listPlots();
-      const plotsData = sortPlotsById(plotsRes.data ?? []);
+      // 1) Load dashboard data (same endpoints as destination pages)
+      const [dashboardData, pendingApprovals] = await Promise.all([
+        getDashboardStats(),
+        getPendingRescheduleApprovals(),
+      ]);
+      const plotsData = sortPlotsById(dashboardData.plots ?? []);
       setPlots(plotsData);
+      setRawTasks(dashboardData.tasks ?? []);
+      setWorkers(dashboardData.workers ?? []);
+      setPendingRescheduleApprovals(pendingApprovals);
 
       // 2) Load tasks (all tasks)
-      const tasksRes = await listTasks();
-      const tasksData = tasksRes.data ?? [];
+      const tasksData = dashboardData.tasks ?? [];
 
       // 3) Enrich tasks with plot name
       const plotNameById = new Map<string, string>(
@@ -172,11 +214,19 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadDashboard();
-  }, []);
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    const handler = () => {
+      loadDashboard();
+    };
+    window.addEventListener("tasks:refresh", handler);
+    return () => window.removeEventListener("tasks:refresh", handler);
+  }, [loadDashboard]);
 
   // ✅ Option A: progress is computed at frontend (not stored)
   const plotsWithProgress = useMemo(() => {
@@ -186,9 +236,23 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     }));
   }, [plots]);
 
-  const criticalTasks = useMemo(() => {
-    return tasks.filter((t) => t.decision === 'Stop' || t.decision === 'Pending');
-  }, [tasks]);
+  const plotStatusById = useMemo(() => {
+    const tasksByPlot = new Map<string, Task[]>();
+    for (const task of rawTasks) {
+      const plotId = String(task.plot_id ?? "").trim();
+      if (!plotId) continue;
+      const bucket = tasksByPlot.get(plotId) ?? [];
+      bucket.push(task);
+      tasksByPlot.set(plotId, bucket);
+    }
+
+    const map = new Map<string, Task["decision"]>();
+    for (const plot of plots) {
+      const plotTasks = tasksByPlot.get(plot.id) ?? [];
+      map.set(plot.id, getPlotStatusFromTasks(plotTasks));
+    }
+    return map;
+  }, [plots, rawTasks]);
 
   const upcomingTasks = useMemo(() => {
     return tasks.filter((t) => {
@@ -219,34 +283,39 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     }
   };
 
+  const rescheduleActionCount = useMemo(
+    () => pendingRescheduleApprovals.length,
+    [pendingRescheduleApprovals],
+  );
+
   const stats = useMemo(
     () => [
       {
         label: 'Total Plots',
         value: plotsWithProgress.length,
         icon: '🌱',
-        color: 'from-blue-500 to-blue-600',
+        to: '/plots',
       },
       {
         label: 'Tasks Today',
         value: tasks.filter((t) => t.date === todayStr).length,
         icon: '📋',
-        color: 'from-green-500 to-green-600',
+        to: '/schedule',
       },
       {
         label: 'Active Workers',
-        value: 5, // keep static for MVP unless you add /api/workers count
+        value: workers.length,
         icon: '👷',
-        color: 'from-purple-500 to-purple-600',
+        to: '/workers',
       },
       {
-        label: 'Critical Actions',
-        value: criticalTasks.length,
+        label: 'Reschedule Actions Required',
+        value: rescheduleActionCount,
         icon: '⚠️',
-        color: 'from-red-500 to-red-600',
+        to: '/reschedule',
       },
     ],
-    [plotsWithProgress.length, tasks, todayStr, criticalTasks.length],
+    [plotsWithProgress.length, tasks, todayStr, workers.length, rescheduleActionCount],
   );
 
   return (
@@ -270,16 +339,14 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((stat, index) => (
-          <Card key={index} className="p-5 rounded-2xl bg-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-[#6B7280] mb-1">{stat.label}</p>
-                <p className="text-3xl text-[#111827]">{stat.value}</p>
-              </div>
-              <div className="text-4xl">{stat.icon}</div>
-            </div>
-          </Card>
+        {stats.map((stat) => (
+          <StatCard
+            key={stat.label}
+            label={stat.label}
+            value={stat.value}
+            icon={stat.icon}
+            to={stat.to}
+          />
         ))}
       </div>
 
@@ -346,6 +413,8 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
                   key={plot.id}
                   plot={plot}
                   progressPercent={progressPercent}
+                  status={plotStatusById.get(plot.id) ?? plot.status}
+                  variant="dashboard"
                   onClick={() => onNavigate('plot-details', plot.id)}
                 />
               ))}
