@@ -37,10 +37,41 @@ interface Suggestion {
   reason: string;
 }
 
+function isImportantAlert(taskName: string): boolean {
+  const importantKeywords = [
+    'Waterlogging Risk',
+    'Irrigation Needed',
+    'Heat Stress Alert',
+    'Growth Retardation',
+    'Heavy Rain Alert',
+    'Rain Warning',
+    'Sensor Alert'
+  ];
+  return importantKeywords.some(keyword => taskName.includes(keyword));
+}
+
+function getRecommendationStyle(taskName: string) {
+  if (isImportantAlert(taskName)) {
+    return {
+      bgColor: 'bg-orange-50',
+      borderColor: 'border-orange-200',
+      textColor: 'text-orange-900',
+      iconColor: 'text-orange-600'
+    };
+  }
+  return {
+    bgColor: 'bg-green-50',
+    borderColor: 'border-green-200',
+    textColor: 'text-green-900',
+    iconColor: 'text-green-600'
+  };
+}
+
 export function AnalyticsPage() {
   const [selectedPlot, setSelectedPlot] = useState<string>('all');
   const [weatherSuggestions, setWeatherSuggestions] = useState<Suggestion[]>([]);
   const [sensorAlerts, setSensorAlerts] = useState<Suggestion[]>([]);
+  const [hasUpcomingTasks, setHasUpcomingTasks] = useState<boolean>(true);
 
   useEffect(() => {
     async function fetchData() {
@@ -78,14 +109,23 @@ export function AnalyticsPage() {
         const weather = await safeFetch<WeatherAnalyticsItem[]>(getWeatherAnalytics(), []);
 
         const allTasksRes = await safeFetch(listTasks(), { ok: true, data: [] });
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-        const tasksForTomorrow = allTasksRes.data.filter((t) => t.task_date === tomorrowStr);
+        
+        // Look for tasks in the next 7 days instead of just tomorrow
+        const today = new Date();
+        const next7Days = new Date();
+        next7Days.setDate(today.getDate() + 7);
+        
+        const upcomingTasks = allTasksRes.data.filter((t) => {
+          const taskDate = new Date(t.task_date);
+          return taskDate >= today && taskDate <= next7Days;
+        });
 
-        const weatherForecastForTomorrow = weather.filter((w: WeatherAnalyticsItem) => {
+        // Get weather forecast for the next 7 days
+        const weatherForecastNext7Days = weather.filter((w: WeatherAnalyticsItem) => {
           const dateStr = w.date || w.time;
-          return dateStr && dateStr.slice(0, 10) === tomorrowStr;
+          if (!dateStr) return false;
+          const wDate = new Date(dateStr);
+          return wDate >= today && wDate <= next7Days;
         });
 
         let sensorSummary = null;
@@ -99,11 +139,18 @@ export function AnalyticsPage() {
 
         let suggestions = [];
         try {
-          const result = await getWeatherRescheduleSuggestions(tasksForTomorrow, weatherForecastForTomorrow, sensorSummary);
-          const allSuggestions = result.suggestions ?? [];
-          const alerts = allSuggestions.filter(s => s.affected_by === 'sensor_health');
-          suggestions = allSuggestions.filter(s => s.affected_by !== 'sensor_health');
-          setSensorAlerts(alerts);
+          // Only call if we have tasks to analyze
+          if (upcomingTasks.length > 0) {
+            setHasUpcomingTasks(true);
+            const result = await getWeatherRescheduleSuggestions(upcomingTasks, weatherForecastNext7Days, sensorSummary);
+            const allSuggestions = result.suggestions ?? [];
+            const alerts = allSuggestions.filter(s => s.affected_by === 'sensor_health');
+            suggestions = allSuggestions.filter(s => s.affected_by !== 'sensor_health');
+            setSensorAlerts(alerts);
+          } else {
+            setHasUpcomingTasks(false);
+            console.log('No upcoming tasks in the next 7 days');
+          }
         } catch (e) {
           console.error('Insight suggestion error:', e);
         }
@@ -166,13 +213,21 @@ export function AnalyticsPage() {
         }
       />
 
-      <Card className="p-6 rounded-2xl bg-gradient-to-br from-[#10B981] to-[#059669] text-white shadow-sm">
+      <Card className="p-6 rounded-2xl bg-white shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[18px] font-semibold">Insight Recommendation</h3>
+          <h3 className="text-[18px] font-semibold text-gray-900">Insight Recommendation</h3>
         </div>
         <div className="space-y-3">
           {weatherSuggestions.length > 0 ? (
-            weatherSuggestions.map((sugg, idx) => {
+            weatherSuggestions
+              .sort((a, b) => {
+                const aImportant = isImportantAlert(a.task_name);
+                const bImportant = isImportantAlert(b.task_name);
+                if (aImportant && !bImportant) return -1;
+                if (!aImportant && bImportant) return 1;
+                return 0;
+              })
+              .map((sugg, idx) => {
               const iconMap: Record<string, React.ReactNode> = {
                 DELAY: <Clock className="w-4 h-4" />,
                 TIME_SHIFT: <ArrowRight className="w-4 h-4" />,
@@ -182,29 +237,34 @@ export function AnalyticsPage() {
               const icon = iconMap[sugg.type] ?? null;
 
               const cleanTaskName = sugg.task_name.replace(/\s*\(ID:.*?\)\s*$/i, '').trim();
+              const style = getRecommendationStyle(sugg.task_name);
 
               return (
-                <div key={idx} className="bg-white/10 rounded-xl p-4 shadow-sm border border-white/10 backdrop-blur-sm">
+                <div key={idx} className={`${style.bgColor} rounded-xl p-4 shadow-sm border ${style.borderColor}`}>
                   <div className="flex items-center gap-2 mb-1">
                     {icon ? (
-                      <span className="inline-flex items-center justify-center text-white/90">
+                      <span className={`inline-flex items-center justify-center ${style.iconColor}`}>
                         {icon}
                       </span>
                     ) : null}
-                    <p className="text-[16px] font-medium opacity-95">
+                    <p className={`text-[16px] font-medium ${style.textColor}`}>
                       {cleanTaskName}
                     </p>
                   </div>
-                  <p className="text-[14px] opacity-90 leading-relaxed font-light">
+                  <p className={`text-[14px] ${style.textColor} leading-relaxed opacity-80`}>
                     {sugg.reason}
                   </p>
                 </div>
               );
             })
           ) : (
-            <div className="bg-white/10 rounded-xl p-4 text-center">
-              <p className="opacity-90">No Actionable Insight Required</p>
-              <p className="text-sm opacity-70 mt-1">All tasks are safe to proceed.</p>
+            <div className="bg-gray-50 rounded-xl p-4 text-center border border-gray-200">
+              <p className="text-gray-700">No Actionable Insight Required</p>
+              <p className="text-sm text-gray-500 mt-1">
+                {hasUpcomingTasks
+                  ? 'All upcoming tasks are safe to proceed.' 
+                  : 'No tasks scheduled in the next 7 days. Generate a schedule to see insights.'}
+              </p>
             </div>
           )}
         </div>

@@ -57,6 +57,24 @@ def check_sensor_health():
     """
     alerts = []
     
+    # 🔴 MOCK MODE: Uncomment below to show example sensor alerts in UI
+    # return [
+    #     {
+    #         "sensor": "moisture",
+    #         "duration_hours": 28.5,
+    #         "current_value": 5.2,
+    #         "threshold_min": 15.0,
+    #         "threshold_max": 25.0
+    #     },
+    #     {
+    #         "sensor": "temperature",
+    #         "duration_hours": 30.2,
+    #         "current_value": 12.8,
+    #         "threshold_min": 22.0,
+    #         "threshold_max": 32.0
+    #     }
+    # ]
+    
     try:
         # Get current thresholds
         thresholds = get_thresholds()
@@ -317,178 +335,7 @@ def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, senso
         calendar = daily_weather.to_dict('index')
     
     # ============================================================
-    # STEP 2: Evaluate Each Task Against All Rules
-    # ============================================================
-    
-    for task in scheduled_tasks:
-        # Extract task information
-        task_id = task.get('id')
-        task_name = task.get('title', 'Unknown Task')
-        task_date = task.get('task_date') or task.get('due_date')
-        task_type = task.get('type', '').lower()
-        task_tpl = task.get('tpl_code', '')  # Template code for specific operations
-        
-        if not task_date:
-            continue  # Skip tasks without dates
-        
-        # Get weather for this specific task date
-        task_weather = calendar.get(task_date, {})
-        rain_forecast = task_weather.get('rain', 0.0)
-        temp_forecast = task_weather.get('temperature', None)
-        
-        # --------------------------------------------------------
-        # RULE 1: RAIN PREVENTION (Weather Table from Image)
-        # --------------------------------------------------------
-        # Purpose: Prevent nutrient washout and field erosion based on rainfall
-        # Conditions:
-        #   - Heavy Rain (>10mm): Trigger field inspection
-        #   - Rainy Weather (>2mm): Reschedule fertilization & hormones
-        #   - Clear Skies (<1mm): Execute scheduled tasks
-        
-        if rain_forecast > HEAVY_RAIN_THRESHOLD:
-            # Heavy Rain: >10mm rain
-            if any(sensitive_type in task_type for sensitive_type in RAIN_SENSITIVE_TYPES):
-                recommendations.append({
-                    "task_id": task_id,
-                    "task_name": task_name,
-                    "original_date": task_date,
-                    "suggested_date": "Postpone until after inspection",
-                    "type": "RESCHEDULE",
-                    "severity": "HIGH",
-                    "reason": "☔ Heavy Rain Alert: Increased risk of field erosion. Inspect plot for standing water.",
-                    "affected_by": "weather_rain"
-                })
-                continue
-        elif rain_forecast > RAIN_THRESHOLD:
-            # Rainy Weather: >2mm rain
-            if any(sensitive_type in task_type for sensitive_type in RAIN_SENSITIVE_TYPES):
-                recommendations.append({
-                    "task_id": task_id,
-                    "task_name": task_name,
-                    "original_date": task_date,
-                    "suggested_date": "Postpone to clear day",
-                    "type": "RESCHEDULE",
-                    "severity": "MODERATE",
-                    "reason": "☔ Rain Warning: Rain detected. Halt all spraying tasks (Foliar/Hormone) to prevent nutrient washout.",
-                    "affected_by": "weather_rain"
-                })
-                continue
-        elif rain_forecast < CLEAR_SKIES_THRESHOLD:
-            # Clear Skies: <1mm rain - This is a positive condition
-            # We'll add this as a global message later, not per-task
-            pass
-        
-        # --------------------------------------------------------
-        # RULE 2: SOIL MOISTURE MANAGEMENT (Soil Moisture Table from Image)
-        # --------------------------------------------------------
-        # Purpose: Maintain optimal soil moisture for pineapple root health
-        # Conditions:
-        #   - Sustained High Moisture (>25% for 24h): Trigger drainage task
-        #   - Optimal Moisture (15%-25%): Continue as planned
-        #   - Dry Soil (<15%): Alert for irrigation
-        
-        if sensor_summary:
-            if sensor_summary.avg_moisture > WATERLOGGING_THRESHOLD:
-                # Sustained High Moisture: >25% for 24 hours
-                if any(sensitive_type in task_type for sensitive_type in MOISTURE_SENSITIVE_TYPES):
-                    recommendations.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "original_date": task_date,
-                        "suggested_date": "Postpone until moisture drops below 25%",
-                        "type": "RESCHEDULE",
-                        "severity": "HIGH",
-                        "reason": "🔒 Waterlogging Risk: Soil saturated for >24h. Check drainage immediately to prevent heart rot and root loss.",
-                        "affected_by": "sensor_moisture"
-                    })
-                    continue
-            elif sensor_summary.avg_moisture < DRY_SOIL_THRESHOLD:
-                # Dry Soil: <15%
-                # This generates an alert but doesn't necessarily reschedule tasks
-                # We'll add this as a global alert later
-                pass
-            # Optimal range (15%-25%) - no action needed, handled in global messages
-        
-        # --------------------------------------------------------
-        # RULE 3: TEMPERATURE MANAGEMENT (Temperature Table from Image)
-        # --------------------------------------------------------
-        # Purpose: Optimize task timing based on temperature conditions
-        # Conditions:
-        #   - Heat Stress (>35°C): Reschedule spraying tasks to cooler hours
-        #   - Optimal Temp (20-35°C): Continue as planned
-        #   - Cold Stress (<20°C): Delay fertilization
-        
-        # Check sensor temperature (current conditions)
-        if sensor_summary:
-            if sensor_summary.avg_temp > HEAT_STRESS_THRESHOLD:
-                # Heat Stress: >35C
-                is_heat_sensitive = any(h_type in task_type for h_type in HEAT_SENSITIVE_TYPES)
-                is_flower_induction = any(code in task_tpl for code in FLOWER_INDUCTION_CODES)
-                if not is_flower_induction and 'flower' in task_name.lower():
-                    is_flower_induction = True
-                
-                if is_heat_sensitive or is_flower_induction:
-                    recommendations.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "original_date": task_date,
-                        "suggested_date": "Same day - Morning or Evening",
-                        "type": "TIME_SHIFT",
-                        "severity": "MODERATE",
-                        "reason": "🌡️ Heat Stress Alert: High temps detected. Move hormone/induction tasks to morning or evening to prevent evaporation.",
-                        "affected_by": "sensor_temperature"
-                    })
-                    continue
-            elif sensor_summary.avg_temp < COLD_STRESS_THRESHOLD:
-                # Cold Stress: <20C
-                if 'fertilization' in task_type or 'nutrient' in task_type:
-                    recommendations.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "original_date": task_date,
-                        "suggested_date": "Delay until temperature rises above 20°C",
-                        "type": "DELAY",
-                        "severity": "MODERATE",
-                        "reason": "❄️ Growth Retardation: Temperatures are too low. Postpone heavy fertilization as the plant cannot process nutrients efficiently.",
-                        "affected_by": "sensor_temperature"
-                    })
-                    continue
-            # Optimal range (20-35°C) - no action needed, handled in global messages
-        
-        # Check forecasted temperature for future tasks
-        if temp_forecast:
-            if temp_forecast > HEAT_STRESS_THRESHOLD:
-                is_heat_sensitive = any(h_type in task_type for h_type in HEAT_SENSITIVE_TYPES)
-                is_flower_induction = any(code in task_tpl for code in FLOWER_INDUCTION_CODES)
-                if not is_flower_induction and 'flower' in task_name.lower():
-                    is_flower_induction = True
-                
-                if is_heat_sensitive or is_flower_induction:
-                    recommendations.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "original_date": task_date,
-                        "suggested_date": "Same day - Cooler hours",
-                        "type": "TIME_SHIFT",
-                        "severity": "MODERATE",
-                        "reason": "🌡️ Heat Stress Alert: High temps detected. Move hormone/induction tasks to morning or evening to prevent evaporation.",
-                        "affected_by": "weather_temperature"
-                    })
-            elif temp_forecast < COLD_STRESS_THRESHOLD:
-                if 'fertilization' in task_type or 'nutrient' in task_type:
-                    recommendations.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "original_date": task_date,
-                        "suggested_date": "Delay until warmer weather",
-                        "type": "DELAY",
-                        "severity": "MODERATE",
-                        "reason": "❄️ Growth Retardation: Temperatures are too low. Postpone heavy fertilization as the plant cannot process nutrients efficiently.",
-                        "affected_by": "weather_temperature"
-                    })
-
-    # ============================================================
-    # STEP 3: Generate Global Status Messages (Field-Level Insights)
+    # STEP 2: Generate Global Status Messages (Field-Level Insights)
     # ============================================================
     # These are informational messages showing overall field conditions
     
@@ -545,7 +392,7 @@ def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, senso
                 "suggested_date": "Adjust task timing",
                 "type": "ALERT",
                 "severity": "MODERATE",
-                "reason": "🌡️ Heat Stress Alert: High temps detected. Move hormone/induction tasks to morning or evening to prevent evaporation.",
+                "reason": "Heat Stress Alert: High temps detected. Move hormone/induction tasks to morning or evening to prevent evaporation.",
                 "affected_by": "sensor_temperature"
             })
         elif sensor_summary.avg_temp < COLD_STRESS_THRESHOLD:
