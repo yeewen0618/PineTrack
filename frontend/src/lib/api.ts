@@ -345,6 +345,25 @@ export async function listRescheduleProposals() {
   } as { ok: true; data: Task[] };
 }
 
+export async function getDashboardStats() {
+  const [plotsRes, tasksRes, workersRes] = await Promise.all([
+    listPlots(),
+    listTasks(),
+    listWorkers(),
+  ]);
+
+  return {
+    plots: plotsRes.data ?? [],
+    tasks: tasksRes.data ?? [],
+    workers: workersRes.data ?? [],
+  };
+}
+
+export async function getPendingRescheduleApprovals(): Promise<Task[]> {
+  const res = await listRescheduleProposals();
+  return (res.data ?? []).filter((task) => task.proposed_date);
+}
+
 export async function approveReschedule(taskId: string) {
   const res = await apiFetch<{ ok: true; data: RawBackendTask }>(`/api/tasks/${taskId}/approve-reschedule`, {
     method: "POST",

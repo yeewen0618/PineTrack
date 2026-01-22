@@ -20,11 +20,12 @@ import {
   DialogTrigger
 } from '../components/ui/dialog';
 import { StatusBadge } from '../components/StatusBadge';
-import { createPlotWithPlan, listPlots, updatePlot } from '../lib/api';
-import type { Plot } from '../lib/api';
+import { createPlotWithPlan, listPlots, listTasks, updatePlot } from '../lib/api';
+import type { Plot, Task } from '../lib/api';
 import { Plus, Search, Edit, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePlot } from "../lib/api";
+import { getPlotStatusFromTasks } from '../lib/plotStatus';
 
 
 
@@ -51,6 +52,7 @@ function calcHarvestProgressPercent(plantingDateISO: string, cycleDays = 420): n
 export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [plots, setPlots] = useState<Plot[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedPlot, setSelectedPlot] = useState<Plot | null>(null);
@@ -65,9 +67,9 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
 
   const loadPlots = async () => {
     try {
-      const res = await listPlots();
+      const [plotsRes, tasksRes] = await Promise.all([listPlots(), listTasks()]);
       // Sort by created_at (oldest first) so newly added plots land at the bottom.
-      const sortedPlots = (res.data ?? []).slice().sort((a, b) => {
+      const sortedPlots = (plotsRes.data ?? []).slice().sort((a, b) => {
         const aTime = Date.parse(a.created_at ?? "");
         const bTime = Date.parse(b.created_at ?? "");
 
@@ -79,6 +81,7 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
       });
 
       setPlots(sortedPlots);
+      setTasks(tasksRes.data ?? []);
     } catch (e) {
       toast.error((e as Error).message ?? 'Failed to load plots');
     }
@@ -95,6 +98,24 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
         plot.crop_type.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [plots, searchTerm]);
+
+  const plotStatusById = useMemo(() => {
+    const tasksByPlot = new Map<string, Task[]>();
+    for (const task of tasks) {
+      const plotId = String(task.plot_id ?? "").trim();
+      if (!plotId) continue;
+      const bucket = tasksByPlot.get(plotId) ?? [];
+      bucket.push(task);
+      tasksByPlot.set(plotId, bucket);
+    }
+
+    const map = new Map<string, Task["decision"]>();
+    for (const plot of plots) {
+      const plotTasks = tasksByPlot.get(plot.id) ?? [];
+      map.set(plot.id, getPlotStatusFromTasks(plotTasks));
+    }
+    return map;
+  }, [plots, tasks]);
 
   const handleAddPlot = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -429,7 +450,7 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                     })}
                   </TableCell>
                   <TableCell>
-                    <StatusBadge status={plot.status} />
+                    <StatusBadge status={plotStatusById.get(plot.id) ?? plot.status} />
                   </TableCell>
                   <TableCell>
                     {(() => {
@@ -511,7 +532,10 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
         <Card className="rounded-2xl bg-white shadow-sm p-4">
           <p className="text-[14px] text-[#6B7280] mb-1">Active Issues</p>
           <p className="text-[20px] text-[#111827]">
-            {plots.filter((p) => p.status === 'Stop' || p.status === 'Pending').length}
+            {plots.filter((p) => {
+              const status = plotStatusById.get(p.id) ?? p.status;
+              return status === 'Stop' || status === 'Pending';
+            }).length}
           </p>
         </Card>
       </div>
