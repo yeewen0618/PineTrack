@@ -6,11 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:5001",
-      "/auth": "http://127.0.0.1:5001",
-      "/analytics": "http://127.0.0.1:5001",
-      "/suggestions": "http://127.0.0.1:5001",
-      "/config": "http://127.0.0.1:5001",
+      "/api": "http://127.0.0.1:8000",
+      "/auth": "http://127.0.0.1:8000",
+      "/analytics": "http://127.0.0.1:8000",
+      "/suggestions": "http://127.0.0.1:8000",
+      "/config": "http://127.0.0.1:8000",
     },
   },
 })

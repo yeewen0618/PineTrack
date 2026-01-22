@@ -183,7 +183,7 @@ def data_processing_pipeline(plot_id=None):
         final_df[f'{s}_raw'] = df_raw[s]     # We grab the original values from df_raw
     
     # Ensure plot_id is filled
-    final_df['plot_id'] = final_df['plot_id'].fillna(0)
+    final_df['plot_id'] = final_df['plot_id'].fillna('UNKNOWN')
 
     # Calculate Quality Assessment on the FINAL Data (Using Raw Values)
     print("Running Quality Assessment on raw data...")
@@ -209,7 +209,7 @@ def data_processing_pipeline(plot_id=None):
             return val if pd.notnull(val) and not np.isinf(val) else None
 
         records.append({
-            "plot_id": int(row['plot_id']),
+            "plot_id": str(row['plot_id']),
             "data_added": row['data_added'].isoformat(),
             
             # RAW Data (Using the resampled raw values, so they align with the hour)
