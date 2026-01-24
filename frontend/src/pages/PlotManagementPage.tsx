@@ -20,12 +20,11 @@ import {
   DialogTrigger
 } from '../components/ui/dialog';
 import { StatusBadge } from '../components/StatusBadge';
-import { createPlotWithPlan, listPlots, listTasks, updatePlot } from '../lib/api';
-import type { Plot, Task } from '../lib/api';
+import { createPlotWithPlan, deletePlot, getPlotStatusWindow, listPlots, listPlotSummaries, updatePlot } from '../lib/api';
+import type { Plot } from '../lib/api';
 import { Plus, Search, Edit, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { deletePlot } from "../lib/api";
-import { getPlotStatusFromTasks } from '../lib/plotStatus';
+import { formatPlotDate } from '../components/PlotDates';
 
 
 
@@ -52,7 +51,7 @@ function calcHarvestProgressPercent(plantingDateISO: string, cycleDays = 420): n
 export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [plots, setPlots] = useState<Plot[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [plotStatusById, setPlotStatusById] = useState<Map<string, Plot["status"]>>(new Map());
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedPlot, setSelectedPlot] = useState<Plot | null>(null);
@@ -67,7 +66,8 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
 
   const loadPlots = async () => {
     try {
-      const [plotsRes, tasksRes] = await Promise.all([listPlots(), listTasks()]);
+      const window = getPlotStatusWindow();
+      const [plotsRes, summariesRes] = await Promise.all([listPlots(), listPlotSummaries(window)]);
       // Sort by created_at (oldest first) so newly added plots land at the bottom.
       const sortedPlots = (plotsRes.data ?? []).slice().sort((a, b) => {
         const aTime = Date.parse(a.created_at ?? "");
@@ -81,7 +81,11 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
       });
 
       setPlots(sortedPlots);
-      setTasks(tasksRes.data ?? []);
+      const statusMap = new Map<string, Plot["status"]>();
+      for (const summary of summariesRes.data ?? []) {
+        statusMap.set(summary.plot_id, summary.plot_status);
+      }
+      setPlotStatusById(statusMap);
     } catch (e) {
       toast.error((e as Error).message ?? 'Failed to load plots');
     }
@@ -107,23 +111,6 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
     );
   }, [plots, searchTerm]);
 
-  const plotStatusById = useMemo(() => {
-    const tasksByPlot = new Map<string, Task[]>();
-    for (const task of tasks) {
-      const plotId = String(task.plot_id ?? "").trim();
-      if (!plotId) continue;
-      const bucket = tasksByPlot.get(plotId) ?? [];
-      bucket.push(task);
-      tasksByPlot.set(plotId, bucket);
-    }
-
-    const map = new Map<string, Task["decision"]>();
-    for (const plot of plots) {
-      const plotTasks = tasksByPlot.get(plot.id) ?? [];
-      map.set(plot.id, getPlotStatusFromTasks(plotTasks));
-    }
-    return map;
-  }, [plots, tasks]);
 
   const handleAddPlot = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -433,7 +420,8 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                 <TableHead className="text-[14px]">Name</TableHead>
                 <TableHead className="text-[14px]">Crop Type</TableHead>
                 <TableHead className="text-[14px]">Area</TableHead>
-                <TableHead className="text-[14px]">Planting Date</TableHead>
+                <TableHead className="text-[14px]">Start Planting</TableHead>
+                <TableHead className="text-[14px]">Harvest (Est.)</TableHead>
                 <TableHead className="text-[14px]">Status</TableHead>
                 <TableHead className="text-[14px]">Progress</TableHead>
                 <TableHead className="text-right pr-8 text-[14px]">Actions</TableHead>
@@ -451,18 +439,17 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
                   <TableCell className="text-[14px]">{plot.crop_type}</TableCell>
                   <TableCell className="text-[14px]">{plot.area_ha} ha</TableCell>
                   <TableCell className="text-[14px]">
-                    {new Date(plot.planting_date).toLocaleDateString('en-US', {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric'
-                    })}
+                    {formatPlotDate(plot.start_planting_date ?? plot.planting_date)}
+                  </TableCell>
+                  <TableCell className="text-[14px]">
+                    {formatPlotDate(plot.expected_harvest_date)}
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={plotStatusById.get(plot.id) ?? plot.status} />
                   </TableCell>
                   <TableCell>
                     {(() => {
-                      const progress = calcHarvestProgressPercent(plot.planting_date);
+                      const progress = calcHarvestProgressPercent(plot.start_planting_date ?? plot.planting_date);
 
                       return (
                         <div className="flex items-center gap-2">
@@ -532,7 +519,11 @@ export function PlotManagementPage({ onNavigate }: PlotManagementPageProps) {
             {plots.length === 0
               ? "—"
               : `${Math.round(
-                plots.reduce((sum, plot) => sum + calcHarvestProgressPercent(plot.planting_date), 0) /
+                plots.reduce(
+                  (sum, plot) =>
+                    sum + calcHarvestProgressPercent(plot.start_planting_date ?? plot.planting_date),
+                  0,
+                ) /
                 plots.length,
               )}%`}
           </p>

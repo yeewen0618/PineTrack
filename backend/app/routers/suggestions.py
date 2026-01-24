@@ -49,7 +49,7 @@ class RescheduleRequest(BaseModel):
 # Helper Functions
 # ============================================================================
 
-def check_sensor_health():
+def check_sensor_health(plot_id: Optional[str] = None):
     """
     Check if sensor readings have been out of threshold for more than 24 hours.
     Returns dict with alerts for moisture and temperature if they're out of range.
@@ -64,18 +64,19 @@ def check_sensor_health():
         # Get data from last 30 hours to be safe
         time_threshold = (datetime.now() - timedelta(hours=30)).isoformat()
         
-        response = supabase.table("cleaned_data")\
-            .select("timestamp, temperature, soil_moisture")\
-            .gte("timestamp", time_threshold)\
-            .order("timestamp")\
-            .execute()
+        query = supabase.table("cleaned_data")\
+            .select("data_added, temperature, soil_moisture")\
+            .gte("data_added", time_threshold)
+        if plot_id:
+            query = query.eq("plot_id", plot_id)
+        response = query.order("data_added").execute()
         
         if not response.data or len(response.data) < 2:
             # Not enough data to make determination
             return alerts
         
         df = pd.DataFrame(response.data)
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df['data_added'] = pd.to_datetime(df['data_added'])
         
         # Check moisture readings
         if 'soil_moisture' in df.columns:
@@ -87,7 +88,7 @@ def check_sensor_health():
             
             if len(moisture_out) > 0:
                 # Check if first and last out-of-range readings span > 24 hours
-                time_span = (moisture_out['timestamp'].max() - moisture_out['timestamp'].min()).total_seconds() / 3600
+                time_span = (moisture_out['data_added'].max() - moisture_out['data_added'].min()).total_seconds() / 3600
                 
                 # Also check if most recent reading is out of range
                 latest_moisture = df.iloc[-1]['soil_moisture']
@@ -113,7 +114,7 @@ def check_sensor_health():
             
             if len(temp_out) > 0:
                 # Check if first and last out-of-range readings span > 24 hours
-                time_span = (temp_out['timestamp'].max() - temp_out['timestamp'].min()).total_seconds() / 3600
+                time_span = (temp_out['data_added'].max() - temp_out['data_added'].min()).total_seconds() / 3600
                 
                 # Also check if most recent reading is out of range
                 latest_temp = df.iloc[-1]['temperature']
@@ -292,6 +293,8 @@ def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, senso
     # STEP 2: Evaluate Each Task Against All Rules
     # ============================================================
     
+    plot_id = scheduled_tasks[0].get("plot_id") if scheduled_tasks else None
+
     for task in scheduled_tasks:
         # Extract task information
         task_id = task.get('id')
@@ -596,7 +599,7 @@ def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, senso
     # --------------------------------------------------------
     # Check if sensors have been reporting out-of-threshold values for >24 hours
     # This may indicate sensor malfunction or connectivity issues
-    sensor_health_alerts = check_sensor_health()
+    sensor_health_alerts = check_sensor_health(plot_id)
     
     for alert in sensor_health_alerts:
         if alert['sensor'] == 'moisture':

@@ -10,11 +10,10 @@ import { toast } from 'sonner';
 
 import { calcHarvestProgressPercent } from '../lib/progress';
 import { sortPlotsById } from '../lib/sortPlots';
-import { getPlotStatusFromTasks } from '../lib/plotStatus';
 import { InsightRecommendationsCard } from '../components/insights/InsightRecommendationsCard';
 
 // ✅ Use real API
-import { getDashboardStats, getDashboardWeather, getAnalyticsHistory, getPendingRescheduleApprovals, getWeatherAnalytics, getWeatherRescheduleSuggestions } from '../lib/api';
+import { getDashboardStats, getDashboardWeather, getAnalyticsHistory, getPendingRescheduleApprovals, getWeatherAnalytics, getWeatherRescheduleSuggestions, getPlotStatusWindow, listPlotSummaries } from '../lib/api';
 import type { Plot, Task, Worker } from '../lib/api';
 
 // Weather types (aligned with backend response)
@@ -92,10 +91,10 @@ function StatCard({ label, value, icon, to }: StatCardProps) {
 
 export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const [plots, setPlots] = useState<Plot[]>([]);
-  const [rawTasks, setRawTasks] = useState<Task[]>([]);
   const [tasks, setTasks] = useState<TaskVM[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [pendingRescheduleApprovals, setPendingRescheduleApprovals] = useState<Task[]>([]);
+  const [plotSummaries, setPlotSummaries] = useState<Map<string, Task["decision"]>>(new Map());
   const [weather, setWeather] = useState<CurrentWeather | null>(null);
   const [forecast, setForecast] = useState<ForecastDay[]>([]);
   const [weatherSuggestions, setWeatherSuggestions] = useState<Suggestion[]>([]);
@@ -114,15 +113,21 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     setLoading(true);
     try {
       // 1) Load dashboard data (same endpoints as destination pages)
-      const [dashboardData, pendingApprovals] = await Promise.all([
+      const window = getPlotStatusWindow();
+      const [dashboardData, pendingApprovals, summariesRes] = await Promise.all([
         getDashboardStats(),
         getPendingRescheduleApprovals(),
+        listPlotSummaries(window),
       ]);
       const plotsData = sortPlotsById(dashboardData.plots ?? []);
       setPlots(plotsData);
-      setRawTasks(dashboardData.tasks ?? []);
       setWorkers(dashboardData.workers ?? []);
       setPendingRescheduleApprovals(pendingApprovals);
+      const summaryMap = new Map<string, Task["decision"]>();
+      for (const summary of summariesRes.data ?? []) {
+        summaryMap.set(summary.plot_id, summary.plot_status);
+      }
+      setPlotSummaries(summaryMap);
 
       // 2) Load tasks (all tasks)
       const tasksData = dashboardData.tasks ?? [];
@@ -232,27 +237,11 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const plotsWithProgress = useMemo(() => {
     return (plots ?? []).map((p) => ({
       plot: p,
-      progressPercent: calcHarvestProgressPercent(p.planting_date),
+      progressPercent: calcHarvestProgressPercent(p.start_planting_date ?? p.planting_date),
     }));
   }, [plots]);
 
-  const plotStatusById = useMemo(() => {
-    const tasksByPlot = new Map<string, Task[]>();
-    for (const task of rawTasks) {
-      const plotId = String(task.plot_id ?? "").trim();
-      if (!plotId) continue;
-      const bucket = tasksByPlot.get(plotId) ?? [];
-      bucket.push(task);
-      tasksByPlot.set(plotId, bucket);
-    }
-
-    const map = new Map<string, Task["decision"]>();
-    for (const plot of plots) {
-      const plotTasks = tasksByPlot.get(plot.id) ?? [];
-      map.set(plot.id, getPlotStatusFromTasks(plotTasks));
-    }
-    return map;
-  }, [plots, rawTasks]);
+  const plotStatusById = useMemo(() => plotSummaries, [plotSummaries]);
 
   const upcomingTasks = useMemo(() => {
     return tasks.filter((t) => {

@@ -79,6 +79,29 @@ export async function deletePlot(plotId: string) {
 // ---------- Types ----------
 export type PlotStatus = "Proceed" | "Pending" | "Stop";
 
+export type PlotSummary = {
+  plot_id: string;
+  plot_name: string;
+  plot_status: PlotStatus;
+  task_counts: {
+    proceed: number;
+    pending: number;
+    stopped: number;
+    total: number;
+  };
+  pending_approvals_count: number;
+};
+
+export const DEFAULT_PLOT_STATUS_WINDOW_DAYS = 7;
+
+export function getPlotStatusWindow(days: number = DEFAULT_PLOT_STATUS_WINDOW_DAYS, baseDate: Date = new Date()) {
+  const dateFrom = baseDate.toISOString().slice(0, 10);
+  const end = new Date(baseDate);
+  end.setDate(end.getDate() + days);
+  const dateTo = end.toISOString().slice(0, 10);
+  return { date_from: dateFrom, date_to: dateTo };
+}
+
 // Helper interfaces for raw backend responses to avoid 'any'
 interface RawBackendPlot extends Partial<Plot> {
     plot_id?: string | number;
@@ -93,6 +116,8 @@ export type Plot = {
   id: string;
   name: string;
   planting_date: string; // YYYY-MM-DD recommended
+  start_planting_date?: string | null;
+  expected_harvest_date?: string | null;
   location_x: number | null; // grid-based position
   location_y: number | null; // grid-based position
   status: PlotStatus;
@@ -161,6 +186,23 @@ export async function listPlots() {
   });
 
   return { ...res, data: normalized };
+}
+
+export async function listPlotSummaries(params?: {
+  date_from?: string;
+  date_to?: string;
+  window_days?: number;
+}) {
+  const query = new URLSearchParams();
+  if (params?.date_from) query.set("date_from", params.date_from);
+  if (params?.date_to) query.set("date_to", params.date_to);
+  if (typeof params?.window_days === "number") {
+    query.set("window_days", String(params.window_days));
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return apiFetch<{ ok: true; date_from: string; date_to: string; data: PlotSummary[] }>(
+    `/api/plots/summary${suffix}`,
+  );
 }
 
 export async function createPlotWithPlan(payload: {
@@ -500,7 +542,9 @@ export type EvaluateStatusThresholdResponse = {
   message: string;
   plot_id: string;
   date: string;
-  updated: number;
+  updated?: number;
+  tasks_updated?: number;
+  tasks_evaluated?: number;
   reading_device_id?: number | null;
   reading_timestamp?: string | null;
 };
@@ -558,8 +602,13 @@ export async function updateTaskEvalThresholds(data: TaskEvalThresholdUpdate) {
 }
 
 export async function evaluateStatusThreshold(payload: EvaluateStatusThresholdPayload) {
-  return apiFetch<EvaluateStatusThresholdResponse>("/api/schedule/evaluate-status-threshold", {
+  const res = await apiFetch<EvaluateStatusThresholdResponse>("/api/schedule/evaluate-status-threshold", {
     method: "POST",
     body: JSON.stringify(payload),
   });
+  const normalizedUpdated = typeof res.updated === "number" ? res.updated : res.tasks_updated ?? 0;
+  return {
+    ...res,
+    updated: normalizedUpdated,
+  };
 }

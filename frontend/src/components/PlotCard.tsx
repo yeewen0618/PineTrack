@@ -3,6 +3,7 @@ import { Card } from "./ui/card";
 import { StatusBadge } from "./StatusBadge";
 import type { Plot, PlotStatus } from "../lib/api";
 import { MapPin } from "lucide-react";
+import { PlotDates } from "./PlotDates";
 
 interface PlotCardProps {
   plot: Plot;
@@ -48,6 +49,9 @@ export function PlotCard({
   ariaLabel,
 }: PlotCardProps) {
   const resolvedStatus = status ?? plot.status;
+  const startDate = plot.start_planting_date ?? plot.planting_date;
+  const harvestDate = plot.expected_harvest_date;
+
   const interactiveProps = onClick
     ? {
         role: "button" as const,
@@ -77,6 +81,13 @@ export function PlotCard({
         <div className="space-y-2 text-base text-white/90">
           <p>{plot.area_ha} hectares</p>
         </div>
+
+        <PlotDates
+          variant="dark"
+          startPlantingDate={startDate}
+          harvestDate={harvestDate}
+          className="mt-3"
+        />
 
         <div className="mt-4 pt-4 border-t border-white/20">
           <div className="flex items-center justify-between">
@@ -120,12 +131,19 @@ export function PlotCard({
       </div>
 
       {/* Meta */}
-      <div className="grid grid-cols-1 gap-4 text-sm mb-4">
+      <div className="grid grid-cols-1 gap-4 text-sm mb-2">
         <div>
           <p className="text-sm text-[#6B7280]">Area</p>
           <p className="text-base font-medium text-[#111827]">{plot.area_ha} ha</p>
         </div>
       </div>
+
+      <PlotDates
+        variant="light"
+        startPlantingDate={startDate}
+        harvestDate={harvestDate}
+        className="mt-1 mb-3"
+      />
 
       {/* Progress (same logic as Plot Management) */}
       <div>

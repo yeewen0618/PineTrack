@@ -17,6 +17,12 @@ from app.reschedule_engine import (
     is_iso_date,
     normalize_weather_df,
 )
+from app.services.reschedule_service import (
+    RESCHEDULE_TYPE_CONFLICT,
+    RESCHEDULE_TYPE_THRESHOLD,
+    supports_approval_state,
+    supports_reschedule_metadata,
+)
 from app.weather_service import fetch_weather_data
 from app.schemas.schedule import GenerateScheduleRequest, EvaluateThresholdStatusRequest
 from app.services.task_eval_threshold_service import TASK_EVAL_DEFAULTS, get_task_eval_thresholds_payload
@@ -25,6 +31,7 @@ from app.services.task_conflict_service import (
     apply_fertiliser_conflict_resolution,
     is_fertiliser_task,
 )
+from app.services.reason_service import merge_reasons, strip_internal_reason
 
 router = APIRouter(prefix="/api/schedule", tags=["Schedule"])
 logger = logging.getLogger(__name__)
@@ -111,7 +118,7 @@ def _load_sensor_summary(device_id: int) -> Dict[str, float]:
     cleaned_res = (
         supabase.table("cleaned_data")
         .select(
-            "device_id, data_added, processed_at, temperature, soil_moisture, "
+            "device_id, data_added, temperature, soil_moisture, "
             "cleaned_temperature, cleaned_soil_moisture"
         )
         .eq("device_id", device_id)
@@ -120,20 +127,6 @@ def _load_sensor_summary(device_id: int) -> Dict[str, float]:
         .execute()
     )
     cleaned_row = (cleaned_res.data or [None])[0]
-
-    if cleaned_row and cleaned_row.get("data_added") is None:
-        fallback_res = (
-            supabase.table("cleaned_data")
-            .select(
-                "device_id, data_added, processed_at, temperature, soil_moisture, "
-                "cleaned_temperature, cleaned_soil_moisture"
-            )
-            .eq("device_id", device_id)
-            .order("processed_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        cleaned_row = (fallback_res.data or [None])[0] or cleaned_row
 
     if not cleaned_row:
         return defaults
@@ -218,15 +211,7 @@ def _looks_like_date(value: Any) -> bool:
 
 
 def _merge_reason(existing: Optional[str], addition: Optional[str]) -> Optional[str]:
-    existing = (existing or "").strip()
-    addition = (addition or "").strip()
-    if existing and addition:
-        return f"{existing} | {addition}"
-    if existing:
-        return existing
-    if addition:
-        return addition
-    return None
+    return merge_reasons(existing, addition)
 
 
 def _fetch_plot_tasks_for_conflict_check(
@@ -251,9 +236,9 @@ def _adjust_proposed_date_for_conflict(
     proposed_date: Optional[str],
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     if not proposed_date:
-        return proposed_date, task.get("reason"), task.get("status")
+        return proposed_date, strip_internal_reason(task.get("reason")), task.get("status")
     if not is_fertiliser_task(task):
-        return proposed_date, task.get("reason"), task.get("status")
+        return proposed_date, strip_internal_reason(task.get("reason")), task.get("status")
 
     candidate = _parse_date_value(proposed_date)
     date_from = candidate - timedelta(days=DEFAULT_HORMONE_BUFFER_DAYS)
@@ -273,14 +258,19 @@ def _adjust_proposed_date_for_conflict(
         shift_task_date=False,
     )
     if not updated:
-        return proposed_date, task.get("reason"), task.get("status")
+        return proposed_date, strip_internal_reason(task.get("reason")), task.get("status")
 
-    return temp_task.get("proposed_date"), temp_task.get("reason"), temp_task.get("status")
+    return (
+        temp_task.get("proposed_date"),
+        strip_internal_reason(temp_task.get("reason")),
+        temp_task.get("status"),
+    )
 
 
 def _apply_insight_reschedules(tasks: List[Dict[str, Any]], suggestions: List[Dict[str, Any]]) -> int:
     task_by_id = {t.get("id"): t for t in tasks if t.get("id")}
     updated = 0
+    metadata_supported = supports_reschedule_metadata()
 
     for rec in suggestions or []:
         if not isinstance(rec, dict):
@@ -322,6 +312,9 @@ def _apply_insight_reschedules(tasks: List[Dict[str, Any]], suggestions: List[Di
             update_payload["original_date"] = task.get("task_date")
         if adjusted_status and adjusted_status != task.get("status"):
             update_payload["status"] = adjusted_status
+        if metadata_supported and adjusted_date:
+            update_payload["reschedule_type"] = RESCHEDULE_TYPE_THRESHOLD
+            update_payload["reschedule_visible"] = True
 
         supabase.table("tasks").update(update_payload).eq("id", task_id).execute()
         updated += 1
@@ -374,7 +367,7 @@ def generate_schedule_for_plot(
         raise HTTPException(status_code=400, detail="No active task templates found")
 
     # 2) If overwrite, delete generated tasks in the horizon window to avoid duplicates
-    #    (delete only tasks that are auto-generated, so manual tasks stay)
+    #    (keep manual tasks that don't have an original_date marker)
     if mode == "overwrite":
         end_date = start_date + timedelta(days=horizon_days)
         try:
@@ -383,7 +376,7 @@ def generate_schedule_for_plot(
                 .eq("plot_id", plot_id) \
                 .gte("task_date", start_date.isoformat()) \
                 .lte("task_date", end_date.isoformat()) \
-                .eq("reason", "Auto-generated from task template") \
+                .not_.is_("original_date", "null") \
                 .execute()
         except APIError as e:
             raise HTTPException(status_code=400, detail=f"Delete failed: {e}")
@@ -412,7 +405,7 @@ def generate_schedule_for_plot(
                 "description": tpl.get("description"),
                 "original_date": d.isoformat(),
                 "proposed_date": None,
-                "reason": "Auto-generated from task template",
+                "reason": None,
                 "buffer_days": buffer_days,
             })
 
@@ -429,12 +422,16 @@ def generate_schedule_for_plot(
     date_from = start_date - timedelta(days=DEFAULT_HORMONE_BUFFER_DAYS)
     existing_tasks = _fetch_plot_tasks_for_conflict_check(plot_id, date_from, end_date)
     all_tasks_for_conflict = existing_tasks + tasks_to_insert
+    metadata_supported = supports_reschedule_metadata()
 
     apply_fertiliser_conflict_resolution(
         tasks_to_insert,
         all_tasks_for_conflict,
         reason=FERTILISER_HORMONE_CONFLICT_REASON,
         shift_task_date=True,
+        create_proposal=False,
+        reschedule_type=RESCHEDULE_TYPE_CONFLICT if metadata_supported else None,
+        reschedule_visible=False if metadata_supported else None,
     )
 
     existing_conflicts = apply_fertiliser_conflict_resolution(
@@ -442,6 +439,9 @@ def generate_schedule_for_plot(
         all_tasks_for_conflict,
         reason=FERTILISER_HORMONE_CONFLICT_REASON,
         shift_task_date=True,
+        create_proposal=False,
+        reschedule_type=RESCHEDULE_TYPE_CONFLICT if metadata_supported else None,
+        reschedule_visible=False if metadata_supported else None,
     )
 
     for task in existing_conflicts:
@@ -455,6 +455,9 @@ def generate_schedule_for_plot(
             "reason": task.get("reason"),
             "original_date": task.get("original_date"),
         }
+        if metadata_supported:
+            update_payload["reschedule_type"] = task.get("reschedule_type")
+            update_payload["reschedule_visible"] = task.get("reschedule_visible")
         supabase.table("tasks").update(update_payload).eq("id", task_id).execute()
 
     # 3.5) Auto-assign workers (round-robin across all active field workers)
@@ -534,64 +537,85 @@ def evaluate_status_threshold_core(
     readings = {k: v for k, v in readings.items() if k in allowed_reading_keys}
     payload_thresholds = thresholds or {}
     reading_meta = None
+    reading_source = "payload" if readings else "cleaned_data"
+    reading_selection_reason = "payload_readings_provided" if readings else None
+    temperature_field_used = "temperature" if readings else None
+    soil_moisture_field_used = "soil_moisture" if readings else None
 
-    # Fetch latest cleaned_data for device_id (prefer data_added desc, fallback to processed_at desc)
-    cleaned_res = (
-        supabase.table("cleaned_data")
-        .select(
-            "device_id, data_added, processed_at, temperature, soil_moisture, "
+    def _fetch_latest_cleaned_row(filter_field: str, filter_value: Any) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+        select_fields = (
+            "plot_id, device_id, data_added, temperature, soil_moisture, "
             "cleaned_temperature, cleaned_soil_moisture"
         )
-        .eq("device_id", device_id)
-        .order("data_added", desc=True)
-        .limit(1)
-        .execute()
-    )
-    cleaned_row = (cleaned_res.data or [None])[0]
-
-    if cleaned_row and cleaned_row.get("data_added") is None:
-        fallback_res = (
-            supabase.table("cleaned_data")
-            .select(
-                "device_id, data_added, processed_at, temperature, soil_moisture, "
-                "cleaned_temperature, cleaned_soil_moisture"
+        try:
+            query = supabase.table("cleaned_data").select(select_fields)
+            if filter_field and filter_value is not None:
+                query = query.eq(filter_field, filter_value)
+            res = query.order("data_added", desc=True).limit(1).execute()
+            return (res.data or [None])[0], None
+        except APIError as exc:
+            logger.warning(
+                "cleaned_data query failed filter=%s value=%s: %s",
+                filter_field,
+                filter_value,
+                exc,
             )
-            .eq("device_id", device_id)
-            .order("processed_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        cleaned_row = (fallback_res.data or [None])[0] or cleaned_row
+            return None, str(exc)
 
-    if cleaned_row:
-        logger.info("DEBUG: cleaned_data query device_id=%s", device_id)
-        logger.info("SUCCESS: Sensor data fetched: %s", cleaned_row)
-        readings = {
-            "temperature": cleaned_row.get("cleaned_temperature")
-            if cleaned_row.get("cleaned_temperature") is not None
-            else cleaned_row.get("temperature"),
-            "soil_moisture": cleaned_row.get("cleaned_soil_moisture")
-            if cleaned_row.get("cleaned_soil_moisture") is not None
-            else cleaned_row.get("soil_moisture"),
-        }
-        reading_meta = {
-            "device_id": cleaned_row.get("device_id", device_id),
-            "timestamp": cleaned_row.get("data_added") or cleaned_row.get("processed_at"),
-        }
-    else:
-        logger.warning("WARNING: No sensor data found for device_id = %s", device_id)
-        logger.info("DEBUG: cleaned_data query device_id=%s", device_id)
-        logger.info("DEBUG: cleaned_data row fetched: %s", cleaned_row)
-        if readings:
-            reading_meta = {
-                "device_id": device_id,
-                "timestamp": None,
-            }
+    if not readings:
+        cleaned_row = None
+        selection_reason = None
+        if plot_id:
+            cleaned_row, err = _fetch_latest_cleaned_row("plot_id", plot_id)
+            if cleaned_row:
+                selection_reason = "plot_id_latest"
+            else:
+                selection_reason = "plot_id_no_data"
+                if err:
+                    selection_reason = f"{selection_reason}; error"
         else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No cleaned_data found for device_id={device_id} and no readings provided",
-            )
+            selection_reason = "plot_id_missing"
+
+        if not cleaned_row and device_id is not None:
+            cleaned_row, err = _fetch_latest_cleaned_row("device_id", device_id)
+            if cleaned_row:
+                selection_reason = "device_id_latest_fallback"
+            else:
+                if selection_reason:
+                    selection_reason = f"{selection_reason}; device_id_no_data"
+                else:
+                    selection_reason = "device_id_no_data"
+
+        reading_selection_reason = selection_reason
+
+        if cleaned_row:
+            logger.info("DEBUG: cleaned_data query plot_id=%s device_id=%s", plot_id, device_id)
+            logger.info("SUCCESS: Sensor data fetched: %s", cleaned_row)
+            if cleaned_row.get("cleaned_temperature") is not None:
+                temperature_field_used = "cleaned_temperature"
+                temperature_val = cleaned_row.get("cleaned_temperature")
+            else:
+                temperature_field_used = "temperature"
+                temperature_val = cleaned_row.get("temperature")
+            if cleaned_row.get("cleaned_soil_moisture") is not None:
+                soil_moisture_field_used = "cleaned_soil_moisture"
+                soil_moisture_val = cleaned_row.get("cleaned_soil_moisture")
+            else:
+                soil_moisture_field_used = "soil_moisture"
+                soil_moisture_val = cleaned_row.get("soil_moisture")
+
+            readings = {
+                "temperature": temperature_val,
+                "soil_moisture": soil_moisture_val,
+            }
+            reading_meta = {
+                "device_id": cleaned_row.get("device_id", device_id),
+                "timestamp": cleaned_row.get("data_added"),
+            }
+            if reading_selection_reason:
+                logger.info("Reading selection reason=%s", reading_selection_reason)
+        else:
+            logger.warning("WARNING: No sensor data found for plot_id=%s device_id=%s", plot_id, device_id)
 
     soil_moisture_val = readings.get("soil_moisture")
     temperature_val = readings.get("temperature")
@@ -651,20 +675,93 @@ def evaluate_status_threshold_core(
         soil_moisture_val,
         temperature_val,
     )
+    temp_exceeded = None
+    if temperature_val is not None and thresholds_used.get("temperature_max") is not None:
+        temp_exceeded = temperature_val > thresholds_used.get("temperature_max")
+    logger.info(
+        "Temp comparison: max_temp=%s temp_value_used=%s temp_exceeded=%s",
+        thresholds_used.get("temperature_max"),
+        temperature_val,
+        temp_exceeded,
+    )
 
     # 1) Load tasks for that plot + date
     tasks_res = (
         supabase.table("tasks")
-        .select("id, type, task_date, status, reason, original_date, proposed_date")
+        .select("id, title, type, task_date, status, reason, original_date, proposed_date")
         .eq("plot_id", plot_id)
         .eq("task_date", target_date.isoformat())
         .execute()
     )
     tasks = tasks_res.data or []
+    logger.info(
+        "Threshold eval selection plot_id=%s date=%s tasks_selected=%s",
+        plot_id,
+        target_date.isoformat(),
+        len(tasks),
+    )
     if not tasks:
-        return {"message": "No tasks on that date", "updated": 0}
+        weather_forecast = []
+        try:
+            weather_forecast = fetch_weather_data(past_days=0, forecast_days=4)
+        except Exception:
+            logger.exception("Weather fetch failed for AI status gating")
+            weather_forecast = []
+        weather_calendar = build_daily_rain_calendar(normalize_weather_df(weather_forecast))
+        rain_today, _ = _get_rain_metrics(weather_calendar, target_date)
+        return {
+            "message": "No tasks selected for evaluation",
+            "plot_id": plot_id,
+            "date": target_date.isoformat(),
+            "device_id": device_id,
+            "reading_timestamp": reading_meta.get("timestamp") if reading_meta else None,
+            "temp_used": temperature_val,
+            "moisture_used": soil_moisture_val,
+            "used_reading": {
+                "source_table": reading_source,
+                "reading_timestamp": reading_meta.get("timestamp") if reading_meta else None,
+                "temperature_field_used": temperature_field_used,
+                "temperature_value_used": temperature_val,
+                "soil_moisture_value_used": soil_moisture_val,
+                "rain_value_used": rain_today,
+                "waterlogging_value_used": None,
+                "selection_reason": reading_selection_reason,
+            },
+            "thresholds_used": thresholds_used,
+            "tasks_evaluated": 0,
+            "tasks_updated": 0,
+            "selection_reason": f"No tasks found for plot_id={plot_id} on {target_date.isoformat()}",
+            "per_task_debug": [],
+        }
+
+    if temperature_val is None and soil_moisture_val is None:
+        return {
+            "ok": True,
+            "message": "No sensor reading found; evaluation skipped",
+            "plot_id": plot_id,
+            "date": target_date.isoformat(),
+            "device_id": device_id,
+            "reading_timestamp": reading_meta.get("timestamp") if reading_meta else None,
+            "temp_used": temperature_val,
+            "moisture_used": soil_moisture_val,
+            "used_reading": {
+                "source_table": reading_source,
+                "reading_timestamp": reading_meta.get("timestamp") if reading_meta else None,
+                "temperature_field_used": temperature_field_used,
+                "temperature_value_used": temperature_val,
+                "soil_moisture_value_used": soil_moisture_val,
+                "rain_value_used": None,
+                "waterlogging_value_used": None,
+                "selection_reason": reading_selection_reason,
+            },
+            "thresholds_used": thresholds_used,
+            "tasks_evaluated": len(tasks),
+            "tasks_updated": 0,
+            "per_task_debug": [],
+        }
 
     updates = []
+    per_task_debug: List[Dict[str, Any]] = []
 
     weather_forecast = []
     try:
@@ -687,11 +784,26 @@ def evaluate_status_threshold_core(
     stop_buffer = 10.0
 
     for t in tasks:
+        previous_status = (t.get("status") or "").strip()
+        debug_notes: List[str] = []
+        decision_reasons: List[str] = []
         pending_reasons: List[str] = []
         stop_reasons: List[str] = []
         new_status = "Proceed"
         new_reason = "Proceed (thresholds OK)"
         new_proposed_date = None
+        if soil_moisture_val is None:
+            debug_notes.append("Soil moisture value missing; moisture rules skipped")
+        if temperature_val is None:
+            debug_notes.append("Temperature value missing; temperature rules skipped")
+        if moisture_max is None:
+            debug_notes.append("soil_moisture_max threshold missing; moisture rules skipped")
+        if moisture_field_max is None:
+            debug_notes.append("soil_moisture_field_max threshold missing; field moisture rules skipped")
+        if temperature_max is None:
+            debug_notes.append("temperature_max threshold missing; max temp rule skipped")
+        if temperature_min is None:
+            debug_notes.append("temperature_min threshold missing; min temp rule skipped")
 
         if t["type"] in ["watering", "irrigation"]:
             if (
@@ -701,16 +813,20 @@ def evaluate_status_threshold_core(
                 if soil_moisture_val > moisture_max:
                     delta = soil_moisture_val - moisture_max
                     if delta > stop_buffer:
-                        stop_reasons.append(
+                        reason = (
                             "Soil moisture "
                             f"{soil_moisture_val:.1f}% exceeded configured max "
                             f"{moisture_max:.1f}% by {delta:.1f} (> {stop_buffer:.1f})"
                         )
+                        stop_reasons.append(reason)
+                        decision_reasons.append(reason)
                     else:
-                        pending_reasons.append(
+                        reason = (
                             f"Soil moisture {soil_moisture_val:.1f}% exceeded configured max "
                             f"{moisture_max:.1f}%"
                         )
+                        pending_reasons.append(reason)
+                        decision_reasons.append(reason)
 
         if t["type"] in ["weeding", "land-prep", "fertilization"]:
             if (
@@ -720,17 +836,21 @@ def evaluate_status_threshold_core(
                 if soil_moisture_val > moisture_field_max:
                     delta = soil_moisture_val - moisture_field_max
                     if delta > stop_buffer:
-                        stop_reasons.append(
+                        reason = (
                             "Soil moisture "
                             f"{soil_moisture_val:.1f}% exceeded configured field max "
                             f"{moisture_field_max:.1f}% by {delta:.1f} (> {stop_buffer:.1f})"
                         )
+                        stop_reasons.append(reason)
+                        decision_reasons.append(reason)
                     else:
-                        pending_reasons.append(
+                        reason = (
                             "Soil moisture "
                             f"{soil_moisture_val:.1f}% exceeded configured field max "
                             f"{moisture_field_max:.1f}%"
                         )
+                        pending_reasons.append(reason)
+                        decision_reasons.append(reason)
 
         if (
             temperature_val is not None
@@ -739,16 +859,20 @@ def evaluate_status_threshold_core(
             if temperature_val > temperature_max:
                 delta = temperature_val - temperature_max
                 if delta > stop_buffer:
-                    stop_reasons.append(
+                    reason = (
                         "Temperature "
                         f"{temperature_val:.1f}C exceeded configured max "
                         f"{temperature_max:.1f}C by {delta:.1f} (> {stop_buffer:.1f})"
                     )
+                    stop_reasons.append(reason)
+                    decision_reasons.append(reason)
                 else:
-                    pending_reasons.append(
+                    reason = (
                         f"Temperature {temperature_val:.1f}C exceeded configured max "
                         f"{temperature_max:.1f}C"
                     )
+                    pending_reasons.append(reason)
+                    decision_reasons.append(reason)
 
         if (
             temperature_val is not None
@@ -757,31 +881,30 @@ def evaluate_status_threshold_core(
             if temperature_val < temperature_min:
                 delta = temperature_min - temperature_val
                 if delta > stop_buffer:
-                    stop_reasons.append(
+                    reason = (
                         "Temperature "
                         f"{temperature_val:.1f}C below configured min "
                         f"{temperature_min:.1f}C by {delta:.1f} (> {stop_buffer:.1f})"
                     )
+                    stop_reasons.append(reason)
+                    decision_reasons.append(reason)
                 else:
-                    pending_reasons.append(
+                    reason = (
                         f"Temperature {temperature_val:.1f}C below configured min "
                         f"{temperature_min:.1f}C"
                     )
+                    pending_reasons.append(reason)
+                    decision_reasons.append(reason)
 
         if stop_reasons or pending_reasons:
-            profile_suffix = (
-                f" (threshold profile: {threshold_profile_name})"
-                if threshold_profile_name
-                else ""
-            )
             if stop_reasons:
                 new_status = "Stop"
                 reason_detail = " | ".join(stop_reasons)
-                new_reason = f"Stop: {reason_detail}{profile_suffix}."
+                new_reason = f"Stop: {reason_detail}."
             else:
                 new_status = "Pending"
                 reason_detail = " | ".join(pending_reasons)
-                proposed_date, reschedule_reason = _find_next_safe_date(
+                proposed_date, _ = _find_next_safe_date(
                     target_date=target_date,
                     reschedule_days=reschedule_days,
                     max_lookahead_days=MAX_LOOKAHEAD_DAYS,
@@ -790,10 +913,8 @@ def evaluate_status_threshold_core(
                     rain_mm_heavy=float(rain_mm_heavy),
                     task_title=t.get("title") or "",
                 )
-                new_reason = (
-                    f"Pending: {reason_detail}{profile_suffix}. {reschedule_reason}"
-                )
                 new_proposed_date = proposed_date.isoformat()
+                new_reason = f"Pending: {reason_detail}. Rescheduled to {new_proposed_date}."
 
         if new_status == "Pending" and new_proposed_date:
             adjusted_date, adjusted_reason, adjusted_status = _adjust_proposed_date_for_conflict(
@@ -823,14 +944,20 @@ def evaluate_status_threshold_core(
         if new_status == "Proceed":
             if ai_label == "Pending":
                 new_status = "Pending"
-                new_reason = _merge_reason(new_reason, f"AI predicted Pending (conf {ai_conf:.2f})")
+                ai_reason = f"AI predicted Pending (conf {ai_conf:.2f})"
+                new_reason = _merge_reason(new_reason, ai_reason)
+                decision_reasons.append(ai_reason)
             elif ai_label == "Stop" and ai_conf >= 0.70:
                 new_status = "Stop"
-                new_reason = _merge_reason(new_reason, f"AI predicted Stop (conf {ai_conf:.2f})")
+                ai_reason = f"AI predicted Stop (conf {ai_conf:.2f})"
+                new_reason = _merge_reason(new_reason, ai_reason)
+                decision_reasons.append(ai_reason)
         elif new_status == "Pending":
             if ai_label == "Stop" and ai_conf >= 0.70:
                 new_status = "Stop"
-                new_reason = _merge_reason(new_reason, f"AI predicted Stop (conf {ai_conf:.2f})")
+                ai_reason = f"AI predicted Stop (conf {ai_conf:.2f})"
+                new_reason = _merge_reason(new_reason, ai_reason)
+                decision_reasons.append(ai_reason)
 
         # Save update if changed
         logger.info(
@@ -839,26 +966,73 @@ def evaluate_status_threshold_core(
             new_status,
             new_proposed_date,
         )
-        updates.append((t["id"], new_status, new_reason, new_proposed_date))
+        if not decision_reasons:
+            decision_reasons.append("Proceed (thresholds OK)")
+        reasons = debug_notes + decision_reasons
+        changed = new_status != previous_status
+        proposed_changed = new_proposed_date != t.get("proposed_date")
+        reason_changed = new_reason != t.get("reason")
+        should_update = changed or proposed_changed or reason_changed
+        per_task_debug.append(
+            {
+                "task_id": t.get("id"),
+                "title": t.get("title"),
+                "task_date": t.get("task_date"),
+                "previous_status": previous_status,
+                "computed_status": new_status,
+                "changed": changed,
+                "reasons": reasons,
+            }
+        )
+        if should_update:
+            updates.append((t["id"], new_status, new_reason, new_proposed_date))
 
     # 3) Apply updates to DB
     updated = 0
+    metadata_supported = supports_reschedule_metadata()
+    approval_supported = supports_approval_state()
     for task_id, st, rs, pd in updates:
-        supabase.table("tasks").update({
+        update_payload = {
             "status": st,
             "reason": rs,
             "proposed_date": pd,
             "original_date": target_date.isoformat()
-        }).eq("id", task_id).execute()
+        }
+        if metadata_supported and pd:
+            update_payload["reschedule_type"] = RESCHEDULE_TYPE_THRESHOLD
+            update_payload["reschedule_visible"] = True
+        if approval_supported and pd:
+            update_payload["approval_state"] = "pending"
+        supabase.table("tasks").update(update_payload).eq("id", task_id).execute()
         updated += 1
 
+    weather_calendar = build_daily_rain_calendar(normalize_weather_df(weather_forecast))
+    rain_today, _ = _get_rain_metrics(weather_calendar, target_date)
+    message = "Status evaluated using thresholds"
+    if updated == 0:
+        message = "No task status changes detected"
     return {
-        "message": "Status evaluated using thresholds",
+        "message": message,
         "plot_id": plot_id,
         "date": target_date.isoformat(),
-        "updated": updated,
-        "reading_device_id": reading_meta.get("device_id") if reading_meta else None,
+        "device_id": device_id,
         "reading_timestamp": reading_meta.get("timestamp") if reading_meta else None,
+        "temp_used": temperature_val,
+        "moisture_used": soil_moisture_val,
+        "used_reading": {
+            "source_table": reading_source,
+            "reading_timestamp": reading_meta.get("timestamp") if reading_meta else None,
+            "temperature_field_used": temperature_field_used,
+            "temperature_value_used": temperature_val,
+            "soil_moisture_value_used": soil_moisture_val,
+            "rain_value_used": rain_today,
+            "waterlogging_value_used": None,
+            "selection_reason": reading_selection_reason,
+        },
+        "thresholds_used": thresholds_used,
+        "tasks_evaluated": len(tasks),
+        "tasks_updated": updated,
+        "per_task_debug": per_task_debug,
     }
 
 @router.post("/evaluate-status-threshold")

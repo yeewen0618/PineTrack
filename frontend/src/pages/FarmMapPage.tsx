@@ -3,13 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { Card } from "../components/ui/card";
 import { Info } from "lucide-react";
 import { toast } from "sonner";
-import { listPlots, listTasks } from "../lib/api";
-import type { Plot, Task } from "../lib/api";
+import { getPlotStatusWindow, listPlots, listPlotSummaries } from "../lib/api";
+import type { Plot } from "../lib/api";
 import { calcHarvestProgressPercent } from "../lib/progress";
 import { sortPlotsById } from "../lib/sortPlots";
 import { FarmSatelliteMap } from "../components/FarmSatelliteMap";
 import { PlotCard } from "../components/PlotCard";
-import { getPlotStatusFromTasks } from "../lib/plotStatus";
 
 interface FarmMapPageProps {
   onNavigate: (page: string, plotId?: string) => void;
@@ -37,16 +36,24 @@ function clamp(n: number, min: number, max: number) {
 
 export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
   const [plots, setPlots] = useState<Plot[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
+  const [plotStatusById, setPlotStatusById] = useState<Map<string, Plot["status"]>>(new Map());
   const navigate = useNavigate();
 
   const loadPlots = useCallback(async () => {
     setLoading(true);
     try {
-      const [plotsRes, tasksRes] = await Promise.all([listPlots(), listTasks()]);
+      const window = getPlotStatusWindow();
+      const [plotsRes, summariesRes] = await Promise.all([
+        listPlots(),
+        listPlotSummaries(window),
+      ]);
       setPlots(sortPlotsById(plotsRes.data ?? []));
-      setTasks(tasksRes.data ?? []);
+      const statusMap = new Map<string, Plot["status"]>();
+      for (const summary of summariesRes.data ?? []) {
+        statusMap.set(summary.plot_id, summary.plot_status);
+      }
+      setPlotStatusById(statusMap);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to load plots";
       toast.error(message);
@@ -68,29 +75,19 @@ export function FarmMapPage({ onNavigate }: FarmMapPageProps) {
   }, [loadPlots]);
 
   const plotsVM: PlotVM[] = useMemo(() => {
-    const tasksByPlot = new Map<string, Task[]>();
-    for (const task of tasks) {
-      const plotId = String(task.plot_id ?? "").trim();
-      if (!plotId) continue;
-      const bucket = tasksByPlot.get(plotId) ?? [];
-      bucket.push(task);
-      tasksByPlot.set(plotId, bucket);
-    }
-
     return (plots ?? []).map((p) => {
       const lng = toNumber(p.location_x);
       const lat = toNumber(p.location_y);
-      const plotTasks = tasksByPlot.get(p.id) ?? [];
 
       return {
         ...p,
-        progressPercent: clamp(calcHarvestProgressPercent(p.planting_date), 0, 100),
+        progressPercent: clamp(calcHarvestProgressPercent(p.start_planting_date ?? p.planting_date), 0, 100),
         lng,
         lat,
-        overallStatus: getPlotStatusFromTasks(plotTasks),
+        overallStatus: plotStatusById.get(p.id) ?? p.status,
       };
     });
-  }, [plots, tasks]);
+  }, [plots, plotStatusById]);
 
   const plotMarkers = useMemo(() => {
     return (plotsVM ?? [])

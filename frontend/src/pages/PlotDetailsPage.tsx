@@ -16,6 +16,7 @@ import {
   TooltipTrigger
 } from '../components/ui/tooltip';
 import { GraphSection } from '../components/analytics/GraphSection';
+import { PlotDates } from '../components/PlotDates';
 import { getPlotById, listTasks } from "../lib/api";
 import type { Plot, Task } from "../lib/api";
 import { calcHarvestProgressPercent } from '../lib/progress';
@@ -97,7 +98,7 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
   if (!plot) return <div>Plot not found</div>;
 
   // ✅ consistent progress from DB planting_date
-  const progress = calcHarvestProgressPercent(plot.planting_date);
+  const progress = calcHarvestProgressPercent(plot.start_planting_date ?? plot.planting_date);
 
   // ✅ normalize tasks to the format your UI expects
   // If your UI expects fields lTask `date` + `status`, map here.
@@ -186,10 +187,13 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
             <p className="text-[20px] font-medium text-[#111827]">{plot.area_ha} hectares</p>
           </div>
           <div>
-            <p className="text-[15px] text-[#6B7280] mb-1">Planting Date</p>
-            <p className="text-[20px] font-medium text-[#111827]">
-              {new Date(plot.planting_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-            </p>
+            <p className="text-[15px] text-[#6B7280] mb-1">Dates</p>
+            <PlotDates
+              variant="light"
+              startPlantingDate={plot.start_planting_date ?? plot.planting_date}
+              harvestDate={plot.expected_harvest_date}
+              className="mt-1"
+            />
           </div>
           <div>
             <p className="text-[15px] text-[#6B7280] mb-1">Progress</p>

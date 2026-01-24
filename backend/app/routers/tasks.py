@@ -9,6 +9,8 @@ from postgrest.exceptions import APIError
 
 from app.core.security import get_current_user
 from app.core.supabase_client import supabase
+from app.services.reason_service import strip_internal_reason
+from app.services.reschedule_service import fetch_pending_reschedule_tasks
 
 
 router = APIRouter(prefix="/api/tasks", tags=["Tasks"])
@@ -58,24 +60,24 @@ def list_tasks(
     except APIError as e:
         message = e.args[0].get("message", str(e))
         raise HTTPException(status_code=500, detail=message)
-    return {"ok": True, "data": res.data or []}
+    rows = res.data or []
+    for row in rows:
+        row["reason"] = strip_internal_reason(row.get("reason"))
+    return {"ok": True, "data": rows}
 
 
 @router.get("/reschedule-proposals")
 def reschedule_proposals(user=Depends(get_current_user)):
     """Return tasks that have proposed_date set (pending approval)."""
     try:
-        res = (
-            supabase.table("tasks")
-            .select("*")
-            .not_.is_("proposed_date", "null")
-            .order("task_date")
-            .execute()
-        )
+        rows = fetch_pending_reschedule_tasks()
     except APIError as e:
         message = e.args[0].get("message", str(e))
         raise HTTPException(status_code=500, detail=message)
-    return {"ok": True, "data": res.data or []}
+
+    for row in rows:
+        row["reason"] = strip_internal_reason(row.get("reason"))
+    return {"ok": True, "data": rows}
 
 
 @router.post("/{task_id}/approve-reschedule")
@@ -99,26 +101,18 @@ def approve_reschedule(task_id: str, user=Depends(get_current_user)):
     if not proposed:
         raise HTTPException(status_code=400, detail="No proposed_date to approve")
 
-    new_reason = (task.get("reason") or "").strip()
-    if new_reason:
-        new_reason = f"{new_reason} | Approved by manager"
-    else:
-        new_reason = "Approved by manager"
+    new_reason = "Reschedule approved."
+    update_payload = {
+        "task_date": proposed,
+        "proposed_date": None,
+        "status": "Proceed",
+        "reason": new_reason,
+    }
+    if "approval_state" in task:
+        update_payload["approval_state"] = "approved"
 
     try:
-        upd = (
-            supabase.table("tasks")
-            .update(
-                {
-                    "task_date": proposed,
-                    "proposed_date": None,
-                    "status": "Proceed",
-                    "reason": new_reason,
-                }
-            )
-            .eq("id", task_id)
-            .execute()
-        )
+        upd = supabase.table("tasks").update(update_payload).eq("id", task_id).execute()
     except APIError as e:
         raise HTTPException(status_code=400, detail=e.args[0].get("message", str(e)))
 
@@ -143,29 +137,22 @@ def reject_reschedule(task_id: str, user=Depends(get_current_user)):
     if not task.get("proposed_date"):
         raise HTTPException(status_code=400, detail="No proposed_date to reject")
 
-    new_reason = (task.get("reason") or "").strip()
-    if new_reason:
-        new_reason = f"{new_reason} | Rejected by manager"
-    else:
-        new_reason = "Rejected by manager"
+    new_reason = "Reschedule rejected."
 
     keep_status = task.get("status") or "Pending"
     if keep_status == "Proceed":
         keep_status = "Pending"
 
+    update_payload = {
+        "proposed_date": None,
+        "status": keep_status,
+        "reason": new_reason,
+    }
+    if "approval_state" in task:
+        update_payload["approval_state"] = "rejected"
+
     try:
-        upd = (
-            supabase.table("tasks")
-            .update(
-                {
-                    "proposed_date": None,
-                    "status": keep_status,
-                    "reason": new_reason,
-                }
-            )
-            .eq("id", task_id)
-            .execute()
-        )
+        upd = supabase.table("tasks").update(update_payload).eq("id", task_id).execute()
     except APIError as e:
         raise HTTPException(status_code=400, detail=e.args[0].get("message", str(e)))
 

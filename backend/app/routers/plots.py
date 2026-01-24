@@ -1,12 +1,14 @@
 import re
+from datetime import date, timedelta, datetime
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Tuple
+from typing import Optional, Tuple
 from postgrest.exceptions import APIError
 
 from app.core.security import get_current_user
 from app.core.supabase_client import supabase
 from app.schemas.plots import CreatePlotWithPlanRequest, UpdatePlotRequest
 from app.routers.schedule import generate_schedule_for_plot
+from app.services.reschedule_service import fetch_pending_reschedule_tasks
 
 router = APIRouter(prefix="/api/plots", tags=["Plots"])
 
@@ -49,6 +51,64 @@ def pick_next_grid_slot(max_x: int = 20, max_y: int = 20) -> Tuple[float, float]
     return 1.0, float(max_y + 1)
 
 
+def _normalize_task_status(value: Optional[str]) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in ("stop", "stopped"):
+        return "Stop"
+    if normalized == "pending":
+        return "Pending"
+    return "Proceed"
+
+def _is_missing_column_error(error: APIError, column: str) -> bool:
+    message = ""
+    if error.args:
+        arg0 = error.args[0]
+        if isinstance(arg0, dict):
+            message = str(arg0.get("message", ""))
+        else:
+            message = str(arg0)
+    return column in message
+
+
+def _parse_date_value(value: Optional[object]) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        try:
+            return datetime.strptime(value[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None
+    return None
+
+
+def _estimate_harvest_date(start_date: date, crop_type: Optional[str]) -> Optional[date]:
+    if not start_date:
+        return None
+    crop = str(crop_type or "").lower()
+    months = None
+    if "pineapple" in crop or "md2" in crop:
+        months = 15
+    if months is None:
+        return None
+    return start_date + timedelta(days=months * 30)
+
+
+def _with_plot_dates(row: dict) -> dict:
+    start_raw = row.get("start_planting_date") or row.get("planting_date")
+    expected_raw = row.get("expected_harvest_date")
+    start_date = _parse_date_value(start_raw)
+    expected_date = _parse_date_value(expected_raw)
+    if expected_date is None and start_date:
+        expected_date = _estimate_harvest_date(start_date, row.get("crop_type"))
+    row["start_planting_date"] = start_date.isoformat() if start_date else None
+    row["expected_harvest_date"] = expected_date.isoformat() if expected_date else None
+    return row
+
+
 @router.get("")
 def list_plots(user=Depends(get_current_user)):
     """List all plots (for Dashboard / Plot Management pages)."""
@@ -57,7 +117,99 @@ def list_plots(user=Depends(get_current_user)):
     except APIError as e:
         message = e.args[0].get("message", str(e))
         raise HTTPException(status_code=500, detail=message)
-    return {"ok": True, "data": res.data or []}
+    rows = res.data or []
+    enriched = [_with_plot_dates(row) for row in rows]
+    return {"ok": True, "data": enriched}
+
+
+@router.get("/summary")
+def list_plot_summaries(
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    window_days: int = 7,
+    user=Depends(get_current_user),
+):
+    base_date = date_from or date.today()
+    end_date = date_to or (base_date + timedelta(days=window_days))
+
+    try:
+        plots_res = (
+            supabase.table("plots")
+            .select("id, name")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        tasks_res = (
+            supabase.table("tasks")
+            .select("plot_id, status, task_date")
+            .gte("task_date", base_date.isoformat())
+            .lte("task_date", end_date.isoformat())
+            .execute()
+        )
+        pending_reschedules = fetch_pending_reschedule_tasks("plot_id")
+    except APIError as e:
+        message = e.args[0].get("message", str(e))
+        raise HTTPException(status_code=500, detail=message)
+
+    plots = plots_res.data or []
+    tasks = tasks_res.data or []
+
+    counts_by_plot: dict[str, dict[str, int]] = {
+        str(plot.get("id")): {"proceed": 0, "pending": 0, "stopped": 0, "total": 0}
+        for plot in plots
+        if plot.get("id") is not None
+    }
+
+    for task in tasks:
+        plot_id = str(task.get("plot_id") or "").strip()
+        if not plot_id:
+            continue
+        bucket = counts_by_plot.setdefault(
+            plot_id, {"proceed": 0, "pending": 0, "stopped": 0, "total": 0}
+        )
+        status = _normalize_task_status(task.get("status"))
+        if status == "Stop":
+            bucket["stopped"] += 1
+        elif status == "Pending":
+            bucket["pending"] += 1
+        else:
+            bucket["proceed"] += 1
+        bucket["total"] += 1
+
+    pending_by_plot: dict[str, int] = {}
+    for task in pending_reschedules or []:
+        plot_id = str(task.get("plot_id") or "").strip()
+        if not plot_id:
+            continue
+        pending_by_plot[plot_id] = pending_by_plot.get(plot_id, 0) + 1
+
+    summaries = []
+    for plot in plots:
+        plot_id = str(plot.get("id"))
+        counts = counts_by_plot.get(plot_id, {"proceed": 0, "pending": 0, "stopped": 0, "total": 0})
+        if counts["stopped"] > 0:
+            plot_status = "Stop"
+        elif counts["pending"] > 0:
+            plot_status = "Pending"
+        else:
+            plot_status = "Proceed"
+
+        summaries.append(
+            {
+                "plot_id": plot_id,
+                "plot_name": plot.get("name"),
+                "plot_status": plot_status,
+                "task_counts": counts,
+                "pending_approvals_count": pending_by_plot.get(plot_id, 0),
+            }
+        )
+
+    return {
+        "ok": True,
+        "date_from": base_date.isoformat(),
+        "date_to": end_date.isoformat(),
+        "data": summaries,
+    }
 
 
 @router.get("/{plot_id}")
@@ -65,7 +217,7 @@ def get_plot(plot_id: str, user=Depends(get_current_user)):
     res = supabase.table("plots").select("*").eq("id", plot_id).limit(1).execute()
     if not res.data:
         raise HTTPException(status_code=404, detail="Plot not found")
-    return {"ok": True, "data": res.data[0]}
+    return {"ok": True, "data": _with_plot_dates(res.data[0])}
 
 
 @router.post("/create-with-plan")
@@ -101,18 +253,29 @@ def create_plot_with_plan(
         "area_ha": payload.area_ha,
         "crop_type": payload.crop_type,
         "planting_date": payload.planting_date.isoformat(),
+        "start_planting_date": payload.planting_date.isoformat(),
         "growth_stage": payload.growth_stage,
         "status": "Proceed",
         "health_score": 0,
         "location_x": loc_x,
         "location_y": loc_y,
     }
+    expected = _estimate_harvest_date(payload.planting_date, payload.crop_type)
+    if expected:
+        plot_row["expected_harvest_date"] = expected.isoformat()
 
     # 4: Insert plot
     try:
         plot_res = supabase.table("plots").insert(plot_row).execute()
     except APIError as e:
-        raise HTTPException(status_code=400, detail=e.args[0]["message"])
+        if _is_missing_column_error(e, "start_planting_date") or _is_missing_column_error(
+            e, "expected_harvest_date"
+        ):
+            plot_row.pop("start_planting_date", None)
+            plot_row.pop("expected_harvest_date", None)
+            plot_res = supabase.table("plots").insert(plot_row).execute()
+        else:
+            raise HTTPException(status_code=400, detail=e.args[0]["message"])
 
     if not plot_res.data:
         raise HTTPException(status_code=400, detail="Failed to create plot")
@@ -169,6 +332,7 @@ def update_plot(
     update_fields = payload.dict(exclude_unset=True)
     if "planting_date" in update_fields and update_fields["planting_date"] is not None:
         update_fields["planting_date"] = update_fields["planting_date"].isoformat()
+        update_fields["start_planting_date"] = update_fields["planting_date"]
 
     if not update_fields:
         raise HTTPException(status_code=400, detail="No fields provided to update")
@@ -176,9 +340,16 @@ def update_plot(
     try:
         res = supabase.table("plots").update(update_fields).eq("id", plot_id).execute()
     except APIError as e:
-        raise HTTPException(status_code=400, detail=e.args[0]["message"])
+        if _is_missing_column_error(e, "start_planting_date") or _is_missing_column_error(
+            e, "expected_harvest_date"
+        ):
+            update_fields.pop("start_planting_date", None)
+            update_fields.pop("expected_harvest_date", None)
+            res = supabase.table("plots").update(update_fields).eq("id", plot_id).execute()
+        else:
+            raise HTTPException(status_code=400, detail=e.args[0]["message"])
 
     if not res.data:
         raise HTTPException(status_code=404, detail="Plot not found")
 
-    return {"ok": True, "data": res.data[0]}
+    return {"ok": True, "data": _with_plot_dates(res.data[0])}

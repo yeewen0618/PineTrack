@@ -11,6 +11,19 @@ type ReasonCardProps = {
   status?: string;
 };
 
+const cleanReasonText = (text: string) => {
+  const parts = text
+    .split("|")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  const cleaned = parts.filter(
+    (part) =>
+      !/auto-generated from task template/i.test(part) &&
+      !/avoid fertiliser application near hormone application/i.test(part),
+  );
+  return cleaned.join(" | ");
+};
+
 const summarizeReason = (text: string) => {
   const trimmed = text.trim();
   if (!trimmed) return "";
@@ -19,7 +32,7 @@ const summarizeReason = (text: string) => {
 };
 
 const parseReason = (reasonText: string): ReasonParseResult => {
-  const raw = reasonText.trim();
+  const raw = cleanReasonText(reasonText).trim();
   const fallbackSummary = summarizeReason(raw);
   let title = "Threshold triggered";
 
