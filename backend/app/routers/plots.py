@@ -9,6 +9,7 @@ from app.core.supabase_client import supabase
 from app.schemas.plots import CreatePlotWithPlanRequest, UpdatePlotRequest
 from app.routers.schedule import generate_schedule_for_plot
 from app.services.reschedule_service import fetch_pending_reschedule_tasks
+from app.services.reason_service import strip_internal_reason
 
 router = APIRouter(prefix="/api/plots", tags=["Plots"])
 
@@ -58,6 +59,67 @@ def _normalize_task_status(value: Optional[str]) -> str:
     if normalized == "pending":
         return "Pending"
     return "Proceed"
+
+
+def _status_from_tasks(tasks: list[dict]) -> Optional[str]:
+    if not tasks:
+        return None
+    has_stop = any(_normalize_task_status(t.get("status")) == "Stop" for t in tasks)
+    if has_stop:
+        return "Stop"
+    has_pending = any(_normalize_task_status(t.get("status")) == "Pending" for t in tasks)
+    if has_pending:
+        return "Pending"
+    return "Proceed"
+
+
+def _fetch_plot_tasks_on_date(plot_id: str, target_date: date) -> list[dict]:
+    res = (
+        supabase.table("tasks")
+        .select("id, status, task_date")
+        .eq("plot_id", plot_id)
+        .eq("task_date", target_date.isoformat())
+        .execute()
+    )
+    return res.data or []
+
+
+def _find_next_task_date(plot_id: str, after_date: date) -> Optional[str]:
+    res = (
+        supabase.table("tasks")
+        .select("task_date")
+        .eq("plot_id", plot_id)
+        .gt("task_date", after_date.isoformat())
+        .order("task_date")
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        return None
+    return res.data[0].get("task_date")
+
+
+def _compute_plot_status(plot_id: str, today: date) -> tuple[str, Optional[str]]:
+    today_tasks = _fetch_plot_tasks_on_date(plot_id, today)
+    today_status = _status_from_tasks(today_tasks)
+    if today_status:
+        return today_status, today.isoformat()
+
+    next_date = _find_next_task_date(plot_id, today)
+    if next_date:
+        try:
+            next_dt = datetime.strptime(next_date[:10], "%Y-%m-%d").date()
+        except ValueError:
+            next_dt = None
+        next_tasks = (
+            _fetch_plot_tasks_on_date(plot_id, next_dt)
+            if next_dt is not None
+            else []
+        )
+        next_status = _status_from_tasks(next_tasks)
+        return (next_status or "Proceed"), next_date
+
+    return "Proceed", None
 
 def _is_missing_column_error(error: APIError, column: str) -> bool:
     message = ""
@@ -218,6 +280,86 @@ def get_plot(plot_id: str, user=Depends(get_current_user)):
     if not res.data:
         raise HTTPException(status_code=404, detail="Plot not found")
     return {"ok": True, "data": _with_plot_dates(res.data[0])}
+
+
+@router.get("/{plot_id}/details")
+def get_plot_details(plot_id: str, user=Depends(get_current_user)):
+    res = supabase.table("plots").select("*").eq("id", plot_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Plot not found")
+    plot_row = _with_plot_dates(res.data[0])
+
+    today = date.today()
+    plot_status, status_date = _compute_plot_status(plot_id, today)
+
+    return {
+        "ok": True,
+        "data": plot_row,
+        "plot_status": plot_status,
+        "status_date": status_date,
+        "today": today.isoformat(),
+    }
+
+
+@router.get("/{plot_id}/tasks")
+def get_plot_tasks(
+    plot_id: str,
+    scope: Optional[str] = None,
+    limit: int = 5,
+    user=Depends(get_current_user),
+):
+    if scope not in (None, "summary"):
+        raise HTTPException(status_code=400, detail="Unsupported scope")
+
+    plot_res = supabase.table("plots").select("id").eq("id", plot_id).limit(1).execute()
+    if not plot_res.data:
+        raise HTTPException(status_code=404, detail="Plot not found")
+
+    safe_limit = max(1, min(int(limit), 50))
+    today = date.today()
+
+    try:
+        upcoming_res = (
+            supabase.table("tasks")
+            .select("*")
+            .eq("plot_id", plot_id)
+            .gte("task_date", today.isoformat())
+            .order("task_date")
+            .limit(safe_limit)
+            .execute()
+        )
+        recent_res = (
+            supabase.table("tasks")
+            .select("*")
+            .eq("plot_id", plot_id)
+            .lt("task_date", today.isoformat())
+            .order("task_date", desc=True)
+            .limit(safe_limit)
+            .execute()
+        )
+    except APIError as e:
+        message = e.args[0].get("message", str(e))
+        raise HTTPException(status_code=500, detail=message)
+
+    upcoming = upcoming_res.data or []
+    recent = recent_res.data or []
+
+    for row in upcoming:
+        row["reason"] = strip_internal_reason(row.get("reason"))
+    for row in recent:
+        row["reason"] = strip_internal_reason(row.get("reason"))
+
+    tasks = upcoming if upcoming else recent
+
+    return {
+        "ok": True,
+        "plot_id": plot_id,
+        "today": today.isoformat(),
+        "upcoming_tasks": upcoming,
+        "recent_tasks": recent,
+        "tasks": tasks,
+        "limit": safe_limit,
+    }
 
 
 @router.post("/create-with-plan")

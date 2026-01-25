@@ -129,6 +129,10 @@ export type Plot = {
   growth_stage?: string | null;
 };
 
+export type PlotDetails = Plot & {
+  plot_status?: PlotStatus;
+};
+
 export type Task = {
   id: string;
   plot_id: string;
@@ -172,6 +176,13 @@ function normalizeWorker(worker: Worker): Worker {
     ...worker,
     id: rawId == null ? "" : String(rawId),
   } as Worker;
+}
+
+function normalizeTask(raw: RawBackendTask): Task {
+  return {
+    ...raw,
+    decision: raw.status as PlotStatus,
+  } as Task;
 }
 
 // ---------- Plots ----------
@@ -250,6 +261,19 @@ export async function getPlotById(plotId: string): Promise<Plot> {
   return plot;
 }
 
+export async function getPlotDetails(plotId: string): Promise<PlotDetails> {
+  const res = await apiFetch<{ ok: true; data: RawBackendPlot; plot_status?: PlotStatus }>(
+    `/api/plots/${encodeURIComponent(plotId)}/details`,
+  );
+  const rawPlot = res.data ?? {};
+  const rawId = rawPlot?.id ?? rawPlot?.plot_id;
+  return {
+    ...(rawPlot as Plot),
+    id: rawId == null ? "" : String(rawId),
+    plot_status: res.plot_status,
+  };
+}
+
 // ---------- Tasks ----------
 export async function listTasks(params?: { plot_id?: string }) {
   const query = params?.plot_id ? `?plot_id=${encodeURIComponent(params.plot_id)}` : "";
@@ -257,10 +281,7 @@ export async function listTasks(params?: { plot_id?: string }) {
 
   return {
     ...res,
-    data: res.data.map((t) => ({
-      ...t,
-      decision: t.status as PlotStatus, // ✅ standard mapping
-    })),
+    data: res.data.map((t) => normalizeTask(t)),
   } as { ok: true; data: Task[] };
 }
 
@@ -268,6 +289,37 @@ export async function listTasks(params?: { plot_id?: string }) {
 export async function getTasksByPlotId(plotId: string): Promise<Task[]> {
   const res = await listTasks({ plot_id: plotId });
   return res.data;
+}
+
+export async function getPlotTaskSummary(plotId: string, limit: number = 5) {
+  const query = new URLSearchParams({
+    scope: "summary",
+    limit: String(limit),
+  });
+  const res = await apiFetch<{
+    ok: true;
+    plot_id: string;
+    today: string;
+    upcoming_tasks: RawBackendTask[];
+    recent_tasks: RawBackendTask[];
+    tasks: RawBackendTask[];
+    limit: number;
+  }>(`/api/plots/${encodeURIComponent(plotId)}/tasks?${query.toString()}`);
+
+  return {
+    ...res,
+    upcoming_tasks: (res.upcoming_tasks ?? []).map((t) => normalizeTask(t)),
+    recent_tasks: (res.recent_tasks ?? []).map((t) => normalizeTask(t)),
+    tasks: (res.tasks ?? []).map((t) => normalizeTask(t)),
+  } as {
+    ok: true;
+    plot_id: string;
+    today: string;
+    upcoming_tasks: Task[];
+    recent_tasks: Task[];
+    tasks: Task[];
+    limit: number;
+  };
 }
 
 export async function updateTaskAssignment(payload: {
@@ -288,10 +340,7 @@ export async function updateTaskAssignment(payload: {
 
   return {
     ...res,
-    data: {
-      ...res.data,
-      decision: res.data.status as PlotStatus,
-    } as Task,
+    data: normalizeTask(res.data),
   };
 }
 
@@ -380,10 +429,7 @@ export async function listRescheduleProposals() {
 
   return {
     ...res,
-    data: res.data.map((t) => ({
-      ...t,
-      decision: t.status as PlotStatus,
-    })),
+    data: res.data.map((t) => normalizeTask(t)),
   } as { ok: true; data: Task[] };
 }
 
@@ -413,10 +459,7 @@ export async function approveReschedule(taskId: string) {
 
   return {
     ...res,
-    data: {
-      ...res.data,
-      decision: res.data.status as PlotStatus,
-    } as Task,
+    data: normalizeTask(res.data),
   } as { ok: true; data: Task };
 }
 
@@ -427,10 +470,7 @@ export async function rejectReschedule(taskId: string) {
 
   return {
     ...res,
-    data: {
-      ...res.data,
-      decision: res.data.status as PlotStatus,
-    } as Task,
+    data: normalizeTask(res.data),
   } as { ok: true; data: Task };
 }
 
