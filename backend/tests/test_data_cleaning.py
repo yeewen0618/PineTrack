@@ -1,77 +1,82 @@
 """
-Unit Tests for Module 2: Data Cleaning
-Refactored to match Test Case Documentation (TC10, TC11, etc.)
-Continuing from Module 1 (TC01-TC09)
+Unit Tests for Module 2: Data Cleaning Operations
+Tests dimension-specific cleaning methods from new_data_processing.py
+TC09 - TC12: Suitability, Accuracy, Completeness Cleaning
+Continuing from Module 1 (TC01-TC08)
+
+Legend: Input = (Raw_Value, Threshold_Min, Threshold_Max) → Output = Cleaned_Value
 """
 
 import pytest
 import pandas as pd
 import numpy as np
 
-class TestDataCleaning:
-    """Test Suite for Data Cleaning Operations - Module 2"""
+# ============================================================
+# SUITABILITY CLEANING (Out-of-Range Outliers)
+# ============================================================
 
-    # ============================================================
-    # DUPLICATE REMOVAL TESTS
-    # ============================================================
+def test_TC09_suitability_replace_outlier():
+    """TC09: Replace out-of-range value with median"""
+    # Input: (Values, Threshold_Max)
+    inp = ([25.0, 26.0, 100.0, 27.0], 50.0)
+    values, max_threshold = inp
+    
+    median = pd.Series(values).median()  # 26.5
+    
+    # Cleaning Logic [new_data_processing.py: lines 175-180]
+    cleaned = [median if v > max_threshold else v for v in values]
+    
+    assert cleaned[2] == median, "Outlier (100) should be replaced with median (26.5)"
 
-    def test_TC10_duplicate_removal_exact(self):
-        """TC10: Verify system removes exact duplicate rows based on timestamp and ID."""
-        df = pd.DataFrame({
-            'temperature': [25, 25],
-            'data_added': [pd.Timestamp('2024-01-01 10:00'), pd.Timestamp('2024-01-01 10:00')],
-            'device_id': [1, 1]
-        })
-        df_clean = df.drop_duplicates(subset=['data_added', 'device_id'], keep='first')
-        assert len(df_clean) == 1
+# ============================================================
+# ACCURACY CLEANING (3-Sigma Outlier Detection)
+# ============================================================
 
-    def test_TC11_duplicate_keeps_first(self):
-        """TC11: Verify that when duplicates exist, the first occurrence is preserved."""
-        df = pd.DataFrame({
-            'temperature': [25, 99], # 99 is a duplicate entry for the same time
-            'data_added': [pd.Timestamp('2024-01-01 10:00'), pd.Timestamp('2024-01-01 10:00')],
-            'device_id': [1, 1]
-        })
-        df_clean = df.drop_duplicates(subset=['data_added', 'device_id'], keep='first')
-        assert df_clean['temperature'].values[0] == 25
+def test_TC10_accuracy_detect_outlier():
+    """TC10: Detect outlier using 3-sigma rule"""
+    # Input: (Normal_Values, Test_Value)
+    inp = ([25.0, 26.0, 27.0, 26.0, 25.0], 150.0)
+    normal_values, test_value = inp
+    
+    # 3-Sigma Logic [new_data_processing.py: lines 186-189]
+    mean = pd.Series(normal_values).mean()
+    std = pd.Series(normal_values).std()
+    is_outlier = test_value > (mean + 3 * std)
+    
+    assert is_outlier, "150 should be detected as outlier"
 
-    # ============================================================
-    # OUTLIER DETECTION TESTS
-    # ============================================================
+# ============================================================
+# COMPLETENESS CLEANING (Missing Data + Duplicates)
+# ============================================================
 
-    def test_TC12_outlier_detection_temperature(self):
-        """TC12: Verify detection of temperature outliers using the IQR method."""
-        df = pd.DataFrame({'temperature': [25, 26, 27, 26, 25, 100, 27, 26]})
-        Q1 = df['temperature'].quantile(0.25)
-        Q3 = df['temperature'].quantile(0.75)
-        IQR = Q3 - Q1
-        upper_bound = Q3 + 1.5 * IQR
-        outliers = df[df['temperature'] > upper_bound]
-        assert 100 in outliers['temperature'].values
+def test_TC11_completeness_fill_nan():
+    """TC11: Fill NaN with median"""
+    # Input: (Values_with_NaN)
+    inp = [25.0, np.nan, 27.0]
+    
+    median = pd.Series(inp).median()  # 26.0
+    
+    # Filling Logic [new_data_processing.py: lines 198-203]
+    cleaned = [median if pd.isna(v) else v for v in inp]
+    
+    assert not pd.isna(cleaned[1]), "NaN should be filled"
+    assert cleaned[1] == median, "NaN should be filled with median (26.0)"
 
-    def test_TC13_outlier_detection_moisture(self):
-        """TC13: Verify detection of moisture outliers outside domain range (5-50%)."""
-        df = pd.DataFrame({'soil_moisture': [20, 90, 21]}) # 90% is unrealistic
-        outliers = df[(df['soil_moisture'] < 5) | (df['soil_moisture'] > 50)]
-        assert 90 in outliers['soil_moisture'].values
-
-    # ============================================================
-    # MISSING VALUE HANDLING TESTS
-    # ============================================================
-
-    def test_TC14_missing_value_detection(self):
-        """TC14: Verify system correctly counts NaN (missing) values."""
-        df = pd.DataFrame({'temp': [25, np.nan, 27, np.nan]})
-        missing_count = df['temp'].isna().sum()
-        assert missing_count == 2
-
-    def test_TC15_missing_value_interpolation(self):
-        """TC15: Verify that missing values are filled using linear interpolation."""
-        df = pd.DataFrame({'temp': [20, np.nan, 30]})
-        df['temp_clean'] = df['temp'].interpolate(method='linear')
-        # The value between 20 and 30 should be 25
-        assert df['temp_clean'].iloc[1] == 25
-        assert df['temp_clean'].isna().sum() == 0
+def test_TC12_completeness_remove_duplicate():
+    """TC12: Remove duplicate rows (same timestamp + plot_id)"""
+    # Input: (Rows = [(temp, timestamp, plot_id), ...])
+    inp = [
+        (25.0, '2024-01-01 10:00', 'A1'),
+        (25.0, '2024-01-01 10:00', 'A1'),  # Duplicate
+        (27.0, '2024-01-01 11:00', 'A1')
+    ]
+    
+    # Duplicate Removal Logic [new_data_processing.py: lines 211-214]
+    df = pd.DataFrame(inp, columns=['temp', 'time', 'plot'])
+    df_clean = df.drop_duplicates(subset=['time', 'plot'], keep='first')
+    
+    assert len(df_clean) == 2, "Duplicate should be removed"
+    assert df_clean['temp'].iloc[0] == 25.0, "First occurrence should be kept"
 
 # ============================================================
 # Run Tests

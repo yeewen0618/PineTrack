@@ -34,8 +34,17 @@ def _fetch_user_by_username(username: str) -> dict:
 
 
 def _authenticate(username: str, password: str) -> dict:
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Login attempt for username: {username}")
     user = _fetch_user_by_username(username)
-    if not verify_password(password, user["password_hash"]):
+    logger.info(f"User found: {user.get('username')}, hash starts with: {user['password_hash'][:20]}")
+    
+    is_valid = verify_password(password, user["password_hash"])
+    logger.info(f"Password verification result: {is_valid}")
+    
+    if not is_valid:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     return user
 

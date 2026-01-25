@@ -38,6 +38,36 @@ function cleanTaskName(name: string) {
   return name.replace(/\s*\(ID:.*?\)\s*$/i, "").trim();
 }
 
+function isImportantAlert(taskName: string): boolean {
+  const importantKeywords = [
+    'Waterlogging Risk',
+    'Irrigation Needed',
+    'Heat Stress Alert',
+    'Growth Retardation',
+    'Heavy Rain Alert',
+    'Rain Warning',
+    'Sensor Alert'
+  ];
+  return importantKeywords.some(keyword => taskName.includes(keyword));
+}
+
+function getRecommendationStyle(taskName: string) {
+  if (isImportantAlert(taskName)) {
+    return {
+      bgColor: 'bg-orange-50',
+      borderColor: 'border-orange-200',
+      textColor: 'text-orange-900',
+      iconColor: 'text-orange-600'
+    };
+  }
+  return {
+    bgColor: 'bg-green-50',
+    borderColor: 'border-green-200',
+    textColor: 'text-green-900',
+    iconColor: 'text-green-600'
+  };
+}
+
 export function InsightRecommendationsCard({
   suggestions,
   variant,
@@ -45,43 +75,54 @@ export function InsightRecommendationsCard({
   onViewAll,
 }: InsightRecommendationsCardProps) {
   const isDashboard = variant === "dashboard";
-  const visibleSuggestions = isDashboard ? suggestions.slice(0, 3) : suggestions;
+  
+  // Sort suggestions: important alerts first, then normal ones
+  const sortedSuggestions = [...suggestions].sort((a, b) => {
+    const aImportant = isImportantAlert(a.task_name);
+    const bImportant = isImportantAlert(b.task_name);
+    if (aImportant && !bImportant) return -1;
+    if (!aImportant && bImportant) return 1;
+    return 0;
+  });
+  
+  const visibleSuggestions = isDashboard ? sortedSuggestions.slice(0, 3) : sortedSuggestions;
   const isInteractive = Boolean(onSuggestionClick);
 
   return (
-    <Card className="p-6 rounded-2xl bg-gradient-to-br from-[#10B981] to-[#059669] text-white shadow-sm">
+    <Card className="p-6 rounded-2xl bg-white shadow-sm">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[18px] font-semibold">Insight Recommendation</h3>
+        <h3 className="text-[18px] font-semibold text-gray-900">Insight Recommendation</h3>
       </div>
       <div className="space-y-3">
         {visibleSuggestions.length > 0 ? (
           visibleSuggestions.map((sugg, idx) => {
             const icon = getSuggestionIcon(sugg.type);
             const title = cleanTaskName(sugg.task_name);
+            const style = getRecommendationStyle(sugg.task_name);
             return (
               <div
                 key={idx}
-                className={`bg-white/10 rounded-xl p-4 shadow-sm border border-white/10 backdrop-blur-sm${isInteractive ? " cursor-pointer hover:bg-white/20 transition-colors" : ""}`}
+                className={`${style.bgColor} rounded-xl p-4 shadow-sm border ${style.borderColor}${isInteractive ? " cursor-pointer hover:opacity-90 transition-opacity" : ""}`}
                 onClick={() => onSuggestionClick?.(sugg)}
               >
                 <div className="flex items-center gap-2 mb-1">
                   {icon ? (
-                    <span className="inline-flex items-center justify-center text-white/90">
+                    <span className={`inline-flex items-center justify-center ${style.iconColor}`}>
                       {icon}
                     </span>
                   ) : null}
-                  <p className="text-[16px] font-medium opacity-95">{title}</p>
+                  <p className={`text-[16px] font-medium ${style.textColor}`}>{title}</p>
                 </div>
-                <p className="text-[14px] opacity-90 leading-relaxed font-light">
+                <p className={`text-[14px] ${style.textColor} leading-relaxed opacity-80`}>
                   {sugg.reason}
                 </p>
               </div>
             );
           })
         ) : (
-          <div className="bg-white/10 rounded-xl p-4 text-center">
-            <p className="opacity-90">No Actionable Insight Required</p>
-            <p className="text-sm opacity-70 mt-1">All tasks are safe to proceed.</p>
+          <div className="bg-gray-50 rounded-xl p-4 text-center border border-gray-200">
+            <p className="text-gray-700">No Actionable Insight Required</p>
+            <p className="text-sm text-gray-500 mt-1">All tasks are safe to proceed.</p>
           </div>
         )}
       </div>
@@ -91,7 +132,7 @@ export function InsightRecommendationsCard({
           <Button
             variant="ghost"
             size="sm"
-            className="text-white hover:bg-white/20 h-8 text-xs w-full"
+            className="text-gray-700 hover:bg-gray-100 h-8 text-xs w-full"
             onClick={onViewAll}
           >
             View all ({suggestions.length})

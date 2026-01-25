@@ -112,21 +112,35 @@ def _stable_start_index(plot_id: str, worker_count: int) -> int:
     return int(digest, 16) % worker_count
 
 
-def _load_sensor_summary(device_id: int) -> Dict[str, float]:
+def _load_sensor_summary(plot_id_for_sensor: int) -> Dict[str, float]:
     defaults = {"avg_n": 0.0, "avg_moisture": 0.0, "avg_temp": 0.0}
 
     cleaned_res = (
         supabase.table("cleaned_data")
         .select(
-            "device_id, data_added, temperature, soil_moisture, "
-            "cleaned_temperature, cleaned_soil_moisture"
+            "plot_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+            "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
         )
-        .eq("device_id", device_id)
+        .eq("plot_id", plot_id_for_sensor)
         .order("data_added", desc=True)
         .limit(1)
         .execute()
     )
     cleaned_row = (cleaned_res.data or [None])[0]
+
+    if cleaned_row and cleaned_row.get("data_added") is None:
+        fallback_res = (
+            supabase.table("cleaned_data")
+            .select(
+                "plot_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+                "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
+            )
+            .eq("plot_id", plot_id_for_sensor)
+            .order("processed_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        cleaned_row = (fallback_res.data or [None])[0] or cleaned_row
 
     if not cleaned_row:
         return defaults
@@ -528,7 +542,7 @@ def generate_schedule(payload: GenerateScheduleRequest, user=Depends(get_current
 def evaluate_status_threshold_core(
     plot_id: str,
     target_date: date,
-    device_id: int = 205,
+    plot_id_for_sensor: int = None,
     reschedule_days: int = 2,
     readings: Optional[Dict[str, float]] = None,
     thresholds: Optional[Dict[str, float]] = None,
@@ -538,89 +552,69 @@ def evaluate_status_threshold_core(
     readings = {k: v for k, v in readings.items() if k in allowed_reading_keys}
     payload_thresholds = thresholds or {}
     reading_meta = None
-    reading_source = "payload" if readings else "cleaned_data"
-    reading_selection_reason = "payload_readings_provided" if readings else None
-    temperature_field_used = "temperature" if readings else None
-    soil_moisture_field_used = "soil_moisture" if readings else None
 
-    # Helper: load the latest cleaned sensor row (optional plot/device filter).
-    def _fetch_latest_cleaned_row(filter_field: str, filter_value: Any) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
-        select_fields = (
-            "plot_id, device_id, data_added, temperature, soil_moisture, "
-            "cleaned_temperature, cleaned_soil_moisture"
+    # Use plot_id as sensor identifier if not explicitly provided
+    if plot_id_for_sensor is None:
+        plot_id_for_sensor = plot_id
+    
+    # Fetch latest cleaned_data for plot_id (prefer data_added desc, fallback to processed_at desc)
+    cleaned_res = (
+        supabase.table("cleaned_data")
+        .select(
+            "plot_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+            "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
         )
-        try:
-            query = supabase.table("cleaned_data").select(select_fields)
-            if filter_field and filter_value is not None:
-                query = query.eq(filter_field, filter_value)
-            res = query.order("data_added", desc=True).limit(1).execute()
-            return (res.data or [None])[0], None
-        except APIError as exc:
-            logger.warning(
-                "cleaned_data query failed filter=%s value=%s: %s",
-                filter_field,
-                filter_value,
-                exc,
+        .eq("plot_id", plot_id_for_sensor)
+        .order("data_added", desc=True)
+        .limit(1)
+        .execute()
+    )
+    cleaned_row = (cleaned_res.data or [None])[0]
+
+    if cleaned_row and cleaned_row.get("data_added") is None:
+        fallback_res = (
+            supabase.table("cleaned_data")
+            .select(
+                "plot_id, data_added, processed_at, temperature, soil_moisture, nitrogen, "
+                "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
             )
-            return None, str(exc)
+            .eq("plot_id", plot_id_for_sensor)
+            .order("processed_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        cleaned_row = (fallback_res.data or [None])[0] or cleaned_row
 
-    # If caller doesn't provide readings, derive the latest cleaned values from DB.
-    if not readings:
-        cleaned_row = None
-        selection_reason = None
-        if plot_id:
-            cleaned_row, err = _fetch_latest_cleaned_row("plot_id", plot_id)
-            if cleaned_row:
-                selection_reason = "plot_id_latest"
-            else:
-                selection_reason = "plot_id_no_data"
-                if err:
-                    selection_reason = f"{selection_reason}; error"
-        else:
-            selection_reason = "plot_id_missing"
-
-        if not cleaned_row and device_id is not None:
-            cleaned_row, err = _fetch_latest_cleaned_row("device_id", device_id)
-            if cleaned_row:
-                selection_reason = "device_id_latest_fallback"
-            else:
-                if selection_reason:
-                    selection_reason = f"{selection_reason}; device_id_no_data"
-                else:
-                    selection_reason = "device_id_no_data"
-
-        reading_selection_reason = selection_reason
-
-        if cleaned_row:
-            logger.info("DEBUG: cleaned_data query plot_id=%s device_id=%s", plot_id, device_id)
-            logger.info("SUCCESS: Sensor data fetched: %s", cleaned_row)
-            if cleaned_row.get("cleaned_temperature") is not None:
-                temperature_field_used = "cleaned_temperature"
-                temperature_val = cleaned_row.get("cleaned_temperature")
-            else:
-                temperature_field_used = "temperature"
-                temperature_val = cleaned_row.get("temperature")
-            if cleaned_row.get("cleaned_soil_moisture") is not None:
-                soil_moisture_field_used = "cleaned_soil_moisture"
-                soil_moisture_val = cleaned_row.get("cleaned_soil_moisture")
-            else:
-                soil_moisture_field_used = "soil_moisture"
-                soil_moisture_val = cleaned_row.get("soil_moisture")
-
-            readings = {
-                "temperature": temperature_val,
-                "soil_moisture": soil_moisture_val,
-            }
+    if cleaned_row:
+        logger.info("DEBUG: cleaned_data query plot_id=%s", plot_id_for_sensor)
+        logger.info("SUCCESS: Sensor data fetched: %s", cleaned_row)
+        readings = {
+            "temperature": cleaned_row.get("cleaned_temperature")
+            if cleaned_row.get("cleaned_temperature") is not None
+            else cleaned_row.get("temperature"),
+            "soil_moisture": cleaned_row.get("cleaned_soil_moisture")
+            if cleaned_row.get("cleaned_soil_moisture") is not None
+            else cleaned_row.get("soil_moisture"),
+        }
+        reading_meta = {
+            "plot_id": cleaned_row.get("plot_id", plot_id_for_sensor),
+            "timestamp": cleaned_row.get("data_added") or cleaned_row.get("processed_at"),
+        }
+    else:
+        logger.warning("WARNING: No sensor data found for plot_id = %s", plot_id_for_sensor)
+        logger.info("DEBUG: cleaned_data query plot_id=%s", plot_id_for_sensor)
+        logger.info("DEBUG: cleaned_data row fetched: %s", cleaned_row)
+        if readings:
             reading_meta = {
-                "device_id": cleaned_row.get("device_id", device_id),
-                "timestamp": cleaned_row.get("data_added"),
+                "plot_id": plot_id_for_sensor,
+                "timestamp": None,
             }
-            if reading_selection_reason:
-                logger.info("Reading selection reason=%s", reading_selection_reason)
         else:
-            logger.warning("WARNING: No sensor data found for plot_id=%s device_id=%s", plot_id, device_id)
+            raise HTTPException(
+                status_code=400,
+                detail=f"No cleaned_data found for plot_id={plot_id_for_sensor} and no readings provided",
+            )
 
-    # Normalize reading values to floats (or None if missing).
     soil_moisture_val = readings.get("soil_moisture")
     temperature_val = readings.get("temperature")
 
@@ -1026,7 +1020,8 @@ def evaluate_status_threshold_core(
         "message": message,
         "plot_id": plot_id,
         "date": target_date.isoformat(),
-        "device_id": device_id,
+        "updated": updated,
+        "reading_plot_id": reading_meta.get("plot_id") if reading_meta else None,
         "reading_timestamp": reading_meta.get("timestamp") if reading_meta else None,
         "temp_used": temperature_val,
         "moisture_used": soil_moisture_val,
@@ -1051,7 +1046,7 @@ def evaluate_status_threshold(payload: EvaluateThresholdStatusRequest, user=Depe
     return evaluate_status_threshold_core(
         plot_id=payload.plot_id,
         target_date=payload.date,
-        device_id=payload.device_id or 205,
+        plot_id_for_sensor=payload.sensor_plot_id,
         reschedule_days=payload.reschedule_days,
         readings=payload.readings,
         thresholds=payload.thresholds,
@@ -1076,8 +1071,9 @@ def get_insights(payload: InsightsRequest, user=Depends(get_current_user)):
     if not tasks:
         return {"suggestions": []}
 
-    device_id = 205
-    sensor_summary = _load_sensor_summary(device_id)
+    # Get sensor data for the first task's plot
+    first_plot_id = tasks_res.data[0]['plot_id'] if tasks_res.data else 205
+    sensor_summary = _load_sensor_summary(first_plot_id)
 
     weather_forecast = payload.weather_forecast
     if weather_forecast is None:

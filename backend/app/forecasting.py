@@ -22,7 +22,8 @@ def generate_forecasts(days: int = 7, plot_id: str = None):
     if plot_id:
         query = query.eq("plot_id", plot_id)
     
-    response = query.order("data_added", desc=True).limit(2000).execute()
+    # Reduced from 2000 to 1000 for faster performance
+    response = query.order("data_added", desc=True).limit(1000).execute()
     data = response.data
     
     if not data:
@@ -60,9 +61,15 @@ def generate_forecasts(days: int = 7, plot_id: str = None):
         X_train = train_df[['hour', 'dayofweek', 'lag_1', 'lag_24']]
         y_train = train_df[target_col]
 
-        # OPTIMIZATION: Reduced n_estimators from 50 to 15 for faster response time
-        # This reduces training time significantly while keeping acceptable accuracy for demo
-        model = RandomForestRegressor(n_estimators=15, max_depth=10, random_state=42, n_jobs=-1)
+        # OPTIMIZATION: Reduced n_estimators to 10 and max_depth to 8 for faster response
+        # This reduces training time significantly while keeping acceptable accuracy
+        model = RandomForestRegressor(
+            n_estimators=10,
+            max_depth=8,
+            min_samples_split=5,
+            random_state=42,
+            n_jobs=-1
+        )
         model.fit(X_train, y_train)
 
         # Iterative Forecasting
@@ -100,20 +107,15 @@ def generate_forecasts(days: int = 7, plot_id: str = None):
     final_output = []
     
     # Use plot_id from parameter or get from training data
-    default_plot_id = plot_id if plot_id else 'A1'
+    # Keep plot_id as string to support both numeric and alphanumeric IDs
+    default_plot_id = plot_id if plot_id else 'P001'
     if not df.empty and 'plot_id' in df.columns:
         default_plot_id = df['plot_id'].iloc[0]
-    
-    # Keep device_id for backward compatibility
-    default_device_id = 1
-    if not df.empty and 'device_id' in df.columns:
-        default_device_id = int(df['device_id'].iloc[0])
 
     for i, ts in enumerate(future_timestamps):
         entry = {
             "forecast_time": ts.isoformat(),
             "plot_id": default_plot_id,
-            "device_id": default_device_id,
             "created_at": pd.Timestamp.now().isoformat(),
             "temperature": float(forecast_results.get("temperature", [0]*len(future_timestamps))[i]),
             "soil_moisture": float(forecast_results.get("soil_moisture", [0]*len(future_timestamps))[i])
@@ -126,7 +128,7 @@ def generate_forecasts(days: int = 7, plot_id: str = None):
         try:
              # Upsert requires a UNIQUE constraint on the conflict column.
              # Since the user's table might not have it yet, we try INSERT to ensure data is saved.
-             # TODO: Recommended to add: ALTER TABLE predictions ADD CONSTRAINT unique_forecast UNIQUE (device_id, forecast_time);
+             # TODO: Recommended to add: ALTER TABLE predictions ADD CONSTRAINT unique_forecast UNIQUE (plot_id, forecast_time);
             
             # First, clean up any existing predictions for these times to avoid duplicates (Manual Upsert)
             # This is a bit safer than blindly inserting if we run this often.
@@ -228,7 +230,10 @@ def forecast_pipeline():
         print(f"   MAE (Mean Abs Error):      {mae:.4f}")
         print(f"   R-Squared Score:           {r2:.4f}")
 
-    print("\n✅ Evaluation complete. (No data uploaded to Supabase)")
+    print("\n✅ Evaluation complete.")
 
 if __name__ == "__main__":
-    forecast_pipeline()
+    # Run forecast and insert results into predictions_test
+    print("\n🤖 Running forecast and saving to predictions_test...")
+    generate_forecasts(days=7, plot_id=None)
+    print("\n✅ Forecasting and insertion complete.")

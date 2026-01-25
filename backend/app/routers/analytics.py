@@ -18,7 +18,7 @@ FORECAST_CACHE = {
     "timestamp": 0,
     "days_param": 0
 }
-CACHE_DURATION_SECONDS = 3600  # 1 hour
+CACHE_DURATION_SECONDS = 21600  # 6 hours (increased for better performance)
 
 @router.get("/weather")
 def get_weather_analytics():
@@ -90,18 +90,16 @@ def get_historical_data(days: int = 30, plot_id: str = None):
         plot_id (str, optional): Filter by specific plot (e.g., 'A1')
     """
     try:
-        # Calculate limit based on days (assuming ~24 records per day per device)
-        # We'll just fetch the latest N records for simplicity or modify query to filter by date if needed.
-        # Ideally, we filter by 'data_added' > (now - days)
+        # Limit to reasonable amount: ~24 records/day * days, capped at 500 for performance
+        limit = min(days * 24, 500)
         
-        # For now, let's just fetch the last 1000 records to ensure we have enough points
         query = supabase.table("cleaned_data").select("*")
         
         # Filter by plot if specified
         if plot_id:
             query = query.eq("plot_id", plot_id)
         
-        response = query.order("data_added", desc=True).limit(1000).execute()
+        response = query.order("data_added", desc=True).limit(limit).execute()
         
         # Reverse to have chronological order for the chart
         data = response.data[::-1] 

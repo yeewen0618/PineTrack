@@ -12,6 +12,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from app.core.supabase_client import supabase
 from app.data_processing import get_thresholds
+from app.services.task_eval_threshold_service import get_task_eval_thresholds_payload, TASK_EVAL_DEFAULTS
 
 # ============================================================================
 # API Router Configuration
@@ -52,88 +53,156 @@ class RescheduleRequest(BaseModel):
 def check_sensor_health(plot_id: Optional[str] = None):
     """
     Check if sensor readings have been out of threshold for more than 24 hours.
-    Returns dict with alerts for moisture and temperature if they're out of range.
+    
+    This function detects potential sensor failures or environmental issues by:
+    1. Checking raw sensor readings against min/max thresholds
+    2. Identifying continuous out-of-range readings spanning 24+ hours
+    3. Verifying the issue persists in most recent reading
+    
+    Returns:
+        List of alert dictionaries containing:
+        - sensor: "moisture" or "temperature"
+        - duration_hours: How long sensor has been out of range
+        - current_value: Latest reading value
+        - threshold_min/max: Expected range limits
+        - message: Human-readable alert description
     """
     alerts = []
     
+    # 🔴 MOCK MODE: Uncomment below to test UI alerts without real data issues
+    # return [
+    #     {
+    #         "sensor": "moisture",
+    #         "duration_hours": 28.5,
+    #         "current_value": 5.2,
+    #         "threshold_min": 15.0,
+    #         "threshold_max": 25.0,
+    #         "message": "⚠️ Soil moisture sensor has been out of range for 28.5 hours. Current: 5.2% (Expected: 15-25%). Check sensor connection or irrigation system."
+    #     }
+    # ]
+    
     try:
-        # Get current thresholds
+        # Get current thresholds from database
         thresholds = get_thresholds()
         
-        # Query cleaned_data for the last 24+ hours
-        # Get data from last 30 hours to be safe
+        # Query RAW_DATA table for the last 30 hours
+        # (extra buffer to ensure we catch 24+ hour issues)
+        # We check raw data to detect sensor failures BEFORE any data processing
         time_threshold = (datetime.now() - timedelta(hours=30)).isoformat()
         
-        query = supabase.table("cleaned_data")\
+        response = supabase.table("raw_data")\
             .select("data_added, temperature, soil_moisture")\
-            .gte("data_added", time_threshold)
-        if plot_id:
-            query = query.eq("plot_id", plot_id)
-        response = query.order("data_added").execute()
+            .gte("data_added", time_threshold)\
+            .order("data_added")\
+            .execute()
         
         if not response.data or len(response.data) < 2:
             # Not enough data to make determination
+            print(f"ℹ️ Not enough sensor data for health check (found {len(response.data) if response.data else 0} records)")
             return alerts
         
         df = pd.DataFrame(response.data)
         df['data_added'] = pd.to_datetime(df['data_added'])
         
-        # Check moisture readings
+        # ====================================================================
+        # CHECK SOIL MOISTURE SENSOR
+        # ====================================================================
         if 'soil_moisture' in df.columns:
-            # Find readings outside threshold
-            moisture_out = df[
-                (df['soil_moisture'] < thresholds['soil_moisture_min']) | 
-                (df['soil_moisture'] > thresholds['soil_moisture_max'])
-            ]
+            # Filter for valid (non-null) moisture readings
+            df_moisture = df[df['soil_moisture'].notna()].copy()
             
-            if len(moisture_out) > 0:
-                # Check if first and last out-of-range readings span > 24 hours
-                time_span = (moisture_out['data_added'].max() - moisture_out['data_added'].min()).total_seconds() / 3600
+            if len(df_moisture) > 0:
+                # Find readings outside threshold (potential sensor failure)
+                moisture_out = df_moisture[
+                    (df_moisture['soil_moisture'] < thresholds['soil_moisture_min']) | 
+                    (df_moisture['soil_moisture'] > thresholds['soil_moisture_max'])
+                ]
                 
-                # Also check if most recent reading is out of range
-                latest_moisture = df.iloc[-1]['soil_moisture']
-                is_currently_out = (latest_moisture < thresholds['soil_moisture_min']) or \
-                                  (latest_moisture > thresholds['soil_moisture_max'])
-                
-                if time_span >= 24 and is_currently_out:
-                    alerts.append({
-                        "sensor": "moisture",
-                        "duration_hours": round(time_span, 1),
-                        "current_value": round(latest_moisture, 2),
-                        "threshold_min": thresholds['soil_moisture_min'],
-                        "threshold_max": thresholds['soil_moisture_max']
-                    })
+                if len(moisture_out) > 0:
+                    # Calculate duration of out-of-range readings
+                    time_span = (moisture_out['data_added'].max() - moisture_out['data_added'].min()).total_seconds() / 3600
+                    
+                    # Check if most recent reading is STILL out of range
+                    latest_moisture = df_moisture.iloc[-1]['soil_moisture']
+                    is_currently_out = (latest_moisture < thresholds['soil_moisture_min']) or \
+                                      (latest_moisture > thresholds['soil_moisture_max'])
+                    
+                    # Alert if issue persisted for 24+ hours AND still ongoing
+                    if time_span >= 24 and is_currently_out:
+                        # Determine if too low or too high
+                        if latest_moisture < thresholds['soil_moisture_min']:
+                            issue_type = "too low"
+                            suggestion = "Check sensor connection or irrigation system."
+                        else:
+                            issue_type = "too high"
+                            suggestion = "Check for water leakage or drainage issues."
+                        
+                        alerts.append({
+                            "sensor": "moisture",
+                            "duration_hours": round(time_span, 1),
+                            "current_value": round(latest_moisture, 2),
+                            "threshold_min": thresholds['soil_moisture_min'],
+                            "threshold_max": thresholds['soil_moisture_max'],
+                            "message": f"⚠️ Soil moisture sensor has been out of range for {round(time_span, 1)} hours. "
+                                     f"Current: {round(latest_moisture, 2)}% ({issue_type}, expected: "
+                                     f"{thresholds['soil_moisture_min']}-{thresholds['soil_moisture_max']}%). {suggestion}"
+                        })
+                        print(f"🚨 ALERT: Moisture sensor out of range for {round(time_span, 1)}h - Current: {round(latest_moisture, 2)}%")
         
-        # Check temperature readings
+        # ====================================================================
+        # CHECK TEMPERATURE SENSOR
+        # ====================================================================
         if 'temperature' in df.columns:
-            # Find readings outside threshold
-            temp_out = df[
-                (df['temperature'] < thresholds['temperature_min']) | 
-                (df['temperature'] > thresholds['temperature_max'])
-            ]
+            # Filter for valid (non-null) temperature readings
+            df_temp = df[df['temperature'].notna()].copy()
             
-            if len(temp_out) > 0:
-                # Check if first and last out-of-range readings span > 24 hours
-                time_span = (temp_out['data_added'].max() - temp_out['data_added'].min()).total_seconds() / 3600
+            if len(df_temp) > 0:
+                # Find readings outside threshold (potential sensor failure)
+                temp_out = df_temp[
+                    (df_temp['temperature'] < thresholds['temperature_min']) | 
+                    (df_temp['temperature'] > thresholds['temperature_max'])
+                ]
                 
-                # Also check if most recent reading is out of range
-                latest_temp = df.iloc[-1]['temperature']
-                is_currently_out = (latest_temp < thresholds['temperature_min']) or \
-                                  (latest_temp > thresholds['temperature_max'])
-                
-                if time_span >= 24 and is_currently_out:
-                    alerts.append({
-                        "sensor": "temperature",
-                        "duration_hours": round(time_span, 1),
-                        "current_value": round(latest_temp, 2),
-                        "threshold_min": thresholds['temperature_min'],
-                        "threshold_max": thresholds['temperature_max']
-                    })
+                if len(temp_out) > 0:
+                    # Calculate duration of out-of-range readings
+                    time_span = (temp_out['data_added'].max() - temp_out['data_added'].min()).total_seconds() / 3600
+                    
+                    # Check if most recent reading is STILL out of range
+                    latest_temp = df_temp.iloc[-1]['temperature']
+                    is_currently_out = (latest_temp < thresholds['temperature_min']) or \
+                                      (latest_temp > thresholds['temperature_max'])
+                    
+                    # Alert if issue persisted for 24+ hours AND still ongoing
+                    if time_span >= 24 and is_currently_out:
+                        # Determine if too low or too high
+                        if latest_temp < thresholds['temperature_min']:
+                            issue_type = "too low"
+                            suggestion = "Check sensor calibration or environmental conditions."
+                        else:
+                            issue_type = "too high"
+                            suggestion = "Check sensor placement and environmental conditions."
+                        
+                        alerts.append({
+                            "sensor": "temperature",
+                            "duration_hours": round(time_span, 1),
+                            "current_value": round(latest_temp, 2),
+                            "threshold_min": thresholds['temperature_min'],
+                            "threshold_max": thresholds['temperature_max'],
+                            "message": f"⚠️ Temperature sensor has been out of range for {round(time_span, 1)} hours. "
+                                     f"Current: {round(latest_temp, 2)}°C ({issue_type}, expected: "
+                                     f"{thresholds['temperature_min']}-{thresholds['temperature_max']}°C). {suggestion}"
+                        })
+                        print(f"🚨 ALERT: Temperature sensor out of range for {round(time_span, 1)}h - Current: {round(latest_temp, 2)}°C")
+        
+        if len(alerts) == 0:
+            print(f"✅ All sensors within normal range (checked {len(df)} readings)")
         
         return alerts
         
     except Exception as e:
-        print(f"Error checking sensor health: {e}")
+        print(f"❌ Error checking sensor health: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 # ============================================================================
@@ -181,9 +250,17 @@ def get_weather_reschedule_suggestions(payload: RescheduleRequest):
                  weather_df['datetime'] = pd.to_datetime(weather_df['date'])
         
         # ============================================================
-        # STEP 2: Generate Recommendations
+        # STEP 2: Load Task Evaluation Thresholds from Database
         # ============================================================
-        suggestions = generate_insight_recommendations(tasks, weather_df, sensor_data)
+        task_thresholds, _ = get_task_eval_thresholds_payload()
+        # Fallback to defaults if DB returns empty
+        if not task_thresholds:
+            task_thresholds = TASK_EVAL_DEFAULTS
+        
+        # ============================================================
+        # STEP 3: Generate Recommendations
+        # ============================================================
+        suggestions = generate_insight_recommendations(tasks, weather_df, sensor_data, task_thresholds)
         return {"suggestions": suggestions}
 
     except Exception as e:
@@ -197,13 +274,14 @@ def get_weather_reschedule_suggestions(payload: RescheduleRequest):
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# Configuration Constants: Thresholds and Task Categories
+# Configuration Constants: Task Categories
+# NOTE: Threshold values now loaded from task_eval_thresholds table in DB
 # ----------------------------------------------------------------------------
 
-# RULE 1: Rain Prevention Thresholds
-CLEAR_SKIES_THRESHOLD = 1.0   # mm - Less than 1mm = clear skies
-RAIN_THRESHOLD = 2.0          # mm - More than 2mm = rainy weather
-HEAVY_RAIN_THRESHOLD = 10.0   # mm - More than 10mm = heavy rain
+# RULE 1: Rain Prevention - Thresholds loaded from DB
+# Default fallback values (used only if DB query fails):
+# rain_mm_min = 2.0 mm (rainy weather threshold)
+# rain_mm_heavy = 10.0 mm (heavy rain threshold)
 
 # Tasks sensitive to rain (can be washed away or become ineffective)
 RAIN_SENSITIVE_TYPES = [
@@ -213,11 +291,10 @@ RAIN_SENSITIVE_TYPES = [
     'land-prep'       # Land preparation requires dry soil for proper work
 ]
 
-# RULE 2: Soil Moisture Management
-DRY_SOIL_THRESHOLD = 15.0       # % - Below 15% = dry soil
-OPTIMAL_MOISTURE_MIN = 15.0     # % - 15% = optimal range start
-OPTIMAL_MOISTURE_MAX = 25.0     # % - 25% = optimal range end
-WATERLOGGING_THRESHOLD = 25.0   # % - Above 25% for 24h = waterlogging risk
+# RULE 2: Soil Moisture Management - Thresholds loaded from DB
+# Default fallback values (used only if DB query fails):
+# soil_moisture_min = 15.0% (dry soil threshold)
+# soil_moisture_max = 25.0% (waterlogging threshold)
 
 # Tasks affected by excessive soil moisture
 MOISTURE_SENSITIVE_TYPES = [
@@ -227,11 +304,10 @@ MOISTURE_SENSITIVE_TYPES = [
     'land-prep'   # Machinery can get stuck in wet soil
 ]
 
-# RULE 3: Temperature Management
-COLD_STRESS_THRESHOLD = 20.0     # °C - Below 20°C = cold stress
-OPTIMAL_TEMP_MIN = 20.0          # °C - 20°C = optimal range start
-OPTIMAL_TEMP_MAX = 35.0          # °C - 35°C = optimal range end
-HEAT_STRESS_THRESHOLD = 35.0     # °C - Above 35°C = heat stress
+# RULE 3: Temperature Management - Thresholds loaded from DB
+# Default fallback values (used only if DB query fails):
+# temperature_min = 22.0°C (cold stress threshold)
+# temperature_max = 32.0°C (heat stress threshold)
 
 # Tasks sensitive to high temperature
 HEAT_SENSITIVE_TYPES = [
@@ -249,7 +325,7 @@ FLOWER_INDUCTION_CODES = ['TPL_FLOWER_INDUCTION', 'FLOWER_INDUCTION']
 # Main Recommendation Generation Function
 # ----------------------------------------------------------------------------
 
-def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, sensor_summary):
+def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, sensor_summary, thresholds=None):
     """
     Core Intelligence Engine: Generates recommendations based on multiple rules
     
@@ -261,10 +337,30 @@ def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, senso
         scheduled_tasks: List of tasks with scheduling information
         weather_forecast_df: DataFrame containing weather predictions
         sensor_summary: Current sensor readings from the field
+        thresholds: Dict of threshold values from task_eval_thresholds table
     
     Returns:
         List of recommendation dictionaries with detailed reasoning
     """
+    # Use provided thresholds or fallback to defaults
+    if not thresholds:
+        thresholds = TASK_EVAL_DEFAULTS
+    
+    # Extract threshold values
+    RAIN_THRESHOLD = thresholds.get('rain_mm_min', 2.0)
+    HEAVY_RAIN_THRESHOLD = thresholds.get('rain_mm_heavy', 10.0)
+    DRY_SOIL_THRESHOLD = thresholds.get('soil_moisture_min', 15.0)
+    WATERLOGGING_THRESHOLD = thresholds.get('soil_moisture_max', 25.0)
+    COLD_STRESS_THRESHOLD = thresholds.get('temperature_min', 22.0)
+    HEAT_STRESS_THRESHOLD = thresholds.get('temperature_max', 32.0)
+    
+    # Additional constants not in DB
+    CLEAR_SKIES_THRESHOLD = 1.0  # mm - Less than 1mm = clear skies
+    OPTIMAL_MOISTURE_MIN = DRY_SOIL_THRESHOLD  # Use same as dry threshold
+    OPTIMAL_MOISTURE_MAX = WATERLOGGING_THRESHOLD  # Use same as waterlogging threshold
+    OPTIMAL_TEMP_MIN = COLD_STRESS_THRESHOLD  # Use same as cold threshold
+    OPTIMAL_TEMP_MAX = HEAT_STRESS_THRESHOLD  # Use same as heat threshold
+    
     recommendations = []
     
     # ============================================================
@@ -290,180 +386,7 @@ def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, senso
         calendar = daily_weather.to_dict('index')
     
     # ============================================================
-    # STEP 2: Evaluate Each Task Against All Rules
-    # ============================================================
-    
-    plot_id = scheduled_tasks[0].get("plot_id") if scheduled_tasks else None
-
-    for task in scheduled_tasks:
-        # Extract task information
-        task_id = task.get('id')
-        task_name = task.get('title', 'Unknown Task')
-        task_date = task.get('task_date') or task.get('due_date')
-        task_type = task.get('type', '').lower()
-        task_tpl = task.get('tpl_code', '')  # Template code for specific operations
-        
-        if not task_date:
-            continue  # Skip tasks without dates
-        
-        # Get weather for this specific task date
-        task_weather = calendar.get(task_date, {})
-        rain_forecast = task_weather.get('rain', 0.0)
-        temp_forecast = task_weather.get('temperature', None)
-        
-        # --------------------------------------------------------
-        # RULE 1: RAIN PREVENTION (Weather Table from Image)
-        # --------------------------------------------------------
-        # Purpose: Prevent nutrient washout and field erosion based on rainfall
-        # Conditions:
-        #   - Heavy Rain (>10mm): Trigger field inspection
-        #   - Rainy Weather (>2mm): Reschedule fertilization & hormones
-        #   - Clear Skies (<1mm): Execute scheduled tasks
-        
-        if rain_forecast > HEAVY_RAIN_THRESHOLD:
-            # Heavy Rain: >10mm rain
-            if any(sensitive_type in task_type for sensitive_type in RAIN_SENSITIVE_TYPES):
-                recommendations.append({
-                    "task_id": task_id,
-                    "task_name": task_name,
-                    "original_date": task_date,
-                    "suggested_date": "Postpone until after inspection",
-                    "type": "RESCHEDULE",
-                    "severity": "HIGH",
-                    "reason": "☔ Heavy Rain Alert: Increased risk of field erosion. Inspect plot for standing water.",
-                    "affected_by": "weather_rain"
-                })
-                continue
-        elif rain_forecast > RAIN_THRESHOLD:
-            # Rainy Weather: >2mm rain
-            if any(sensitive_type in task_type for sensitive_type in RAIN_SENSITIVE_TYPES):
-                recommendations.append({
-                    "task_id": task_id,
-                    "task_name": task_name,
-                    "original_date": task_date,
-                    "suggested_date": "Postpone to clear day",
-                    "type": "RESCHEDULE",
-                    "severity": "MODERATE",
-                    "reason": "☔ Rain Warning: Rain detected. Halt all spraying tasks (Foliar/Hormone) to prevent nutrient washout.",
-                    "affected_by": "weather_rain"
-                })
-                continue
-        elif rain_forecast < CLEAR_SKIES_THRESHOLD:
-            # Clear Skies: <1mm rain - This is a positive condition
-            # We'll add this as a global message later, not per-task
-            pass
-        
-        # --------------------------------------------------------
-        # RULE 2: SOIL MOISTURE MANAGEMENT (Soil Moisture Table from Image)
-        # --------------------------------------------------------
-        # Purpose: Maintain optimal soil moisture for pineapple root health
-        # Conditions:
-        #   - Sustained High Moisture (>25% for 24h): Trigger drainage task
-        #   - Optimal Moisture (15%-25%): Continue as planned
-        #   - Dry Soil (<15%): Alert for irrigation
-        
-        if sensor_summary:
-            if sensor_summary.avg_moisture > WATERLOGGING_THRESHOLD:
-                # Sustained High Moisture: >25% for 24 hours
-                if any(sensitive_type in task_type for sensitive_type in MOISTURE_SENSITIVE_TYPES):
-                    recommendations.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "original_date": task_date,
-                        "suggested_date": "Postpone until moisture drops below 25%",
-                        "type": "RESCHEDULE",
-                        "severity": "HIGH",
-                        "reason": "🔒 Waterlogging Risk: Soil saturated for >24h. Check drainage immediately to prevent heart rot and root loss.",
-                        "affected_by": "sensor_moisture"
-                    })
-                    continue
-            elif sensor_summary.avg_moisture < DRY_SOIL_THRESHOLD:
-                # Dry Soil: <15%
-                # This generates an alert but doesn't necessarily reschedule tasks
-                # We'll add this as a global alert later
-                pass
-            # Optimal range (15%-25%) - no action needed, handled in global messages
-        
-        # --------------------------------------------------------
-        # RULE 3: TEMPERATURE MANAGEMENT (Temperature Table from Image)
-        # --------------------------------------------------------
-        # Purpose: Optimize task timing based on temperature conditions
-        # Conditions:
-        #   - Heat Stress (>35°C): Reschedule spraying tasks to cooler hours
-        #   - Optimal Temp (20-35°C): Continue as planned
-        #   - Cold Stress (<20°C): Delay fertilization
-        
-        # Check sensor temperature (current conditions)
-        if sensor_summary:
-            if sensor_summary.avg_temp > HEAT_STRESS_THRESHOLD:
-                # Heat Stress: >35C
-                is_heat_sensitive = any(h_type in task_type for h_type in HEAT_SENSITIVE_TYPES)
-                is_flower_induction = any(code in task_tpl for code in FLOWER_INDUCTION_CODES)
-                if not is_flower_induction and 'flower' in task_name.lower():
-                    is_flower_induction = True
-                
-                if is_heat_sensitive or is_flower_induction:
-                    recommendations.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "original_date": task_date,
-                        "suggested_date": "Same day - Morning or Evening",
-                        "type": "TIME_SHIFT",
-                        "severity": "MODERATE",
-                        "reason": "🌡️ Heat Stress Alert: High temps detected. Move hormone/induction tasks to morning or evening to prevent evaporation.",
-                        "affected_by": "sensor_temperature"
-                    })
-                    continue
-            elif sensor_summary.avg_temp < COLD_STRESS_THRESHOLD:
-                # Cold Stress: <20C
-                if 'fertilization' in task_type or 'nutrient' in task_type:
-                    recommendations.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "original_date": task_date,
-                        "suggested_date": "Delay until temperature rises above 20°C",
-                        "type": "DELAY",
-                        "severity": "MODERATE",
-                        "reason": "❄️ Growth Retardation: Temperatures are too low. Postpone heavy fertilization as the plant cannot process nutrients efficiently.",
-                        "affected_by": "sensor_temperature"
-                    })
-                    continue
-            # Optimal range (20-35°C) - no action needed, handled in global messages
-        
-        # Check forecasted temperature for future tasks
-        if temp_forecast:
-            if temp_forecast > HEAT_STRESS_THRESHOLD:
-                is_heat_sensitive = any(h_type in task_type for h_type in HEAT_SENSITIVE_TYPES)
-                is_flower_induction = any(code in task_tpl for code in FLOWER_INDUCTION_CODES)
-                if not is_flower_induction and 'flower' in task_name.lower():
-                    is_flower_induction = True
-                
-                if is_heat_sensitive or is_flower_induction:
-                    recommendations.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "original_date": task_date,
-                        "suggested_date": "Same day - Cooler hours",
-                        "type": "TIME_SHIFT",
-                        "severity": "MODERATE",
-                        "reason": "🌡️ Heat Stress Alert: High temps detected. Move hormone/induction tasks to morning or evening to prevent evaporation.",
-                        "affected_by": "weather_temperature"
-                    })
-            elif temp_forecast < COLD_STRESS_THRESHOLD:
-                if 'fertilization' in task_type or 'nutrient' in task_type:
-                    recommendations.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "original_date": task_date,
-                        "suggested_date": "Delay until warmer weather",
-                        "type": "DELAY",
-                        "severity": "MODERATE",
-                        "reason": "❄️ Growth Retardation: Temperatures are too low. Postpone heavy fertilization as the plant cannot process nutrients efficiently.",
-                        "affected_by": "weather_temperature"
-                    })
-
-    # ============================================================
-    # STEP 3: Generate Global Status Messages (Field-Level Insights)
+    # STEP 2: Generate Global Status Messages (Field-Level Insights)
     # ============================================================
     # These are informational messages showing overall field conditions
     
@@ -520,7 +443,7 @@ def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, senso
                 "suggested_date": "Adjust task timing",
                 "type": "ALERT",
                 "severity": "MODERATE",
-                "reason": "🌡️ Heat Stress Alert: High temps detected. Move hormone/induction tasks to morning or evening to prevent evaporation.",
+                "reason": "Heat Stress Alert: High temps detected. Move hormone/induction tasks to morning or evening to prevent evaporation.",
                 "affected_by": "sensor_temperature"
             })
         elif sensor_summary.avg_temp < COLD_STRESS_THRESHOLD:
@@ -595,33 +518,46 @@ def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, senso
             })
     
     # --------------------------------------------------------
+    # ============================================================
     # SENSOR HEALTH ALERTS
-    # --------------------------------------------------------
+    # ============================================================
     # Check if sensors have been reporting out-of-threshold values for >24 hours
-    # This may indicate sensor malfunction or connectivity issues
-    sensor_health_alerts = check_sensor_health(plot_id)
+    # This detects:
+    # - Broken/disconnected sensors
+    # - Calibration issues
+    # - Environmental problems (e.g., irrigation failure)
+    print("\n🔍 Checking sensor health...")
+    sensor_health_alerts = check_sensor_health()
     
     for alert in sensor_health_alerts:
         if alert['sensor'] == 'moisture':
             recommendations.append({
                 "task_id": "sensor_alert_moisture",
-                "task_name": "Moisture Sensor Alert",
+                "task_name": "🚨 Soil Moisture Sensor Alert",
                 "original_date": "Immediate",
-                "suggested_date": "Check sensor hardware",
+                "suggested_date": "Check sensor hardware immediately",
                 "type": "TRIGGER",
                 "severity": "CRITICAL",
-                "reason": f"Sensor Alert: Moisture readings out of normal range ({alert['threshold_min']}-{alert['threshold_max']}%) for {alert['duration_hours']}+ hours. Current: {alert['current_value']}%. Sensor may be broken or lost connectivity. Check hardware.",
+                "reason": alert.get('message', 
+                    f"⚠️ Moisture sensor out of range for {alert['duration_hours']}+ hours. "
+                    f"Current: {alert['current_value']}% (Expected: {alert['threshold_min']}-{alert['threshold_max']}%). "
+                    f"Check sensor connection or irrigation system."
+                ),
                 "affected_by": "sensor_health"
             })
         elif alert['sensor'] == 'temperature':
             recommendations.append({
                 "task_id": "sensor_alert_temperature",
-                "task_name": "Temperature Sensor Alert",
+                "task_name": "🚨 Temperature Sensor Alert",
                 "original_date": "Immediate",
-                "suggested_date": "Check sensor hardware",
+                "suggested_date": "Check sensor hardware immediately",
                 "type": "TRIGGER",
                 "severity": "CRITICAL",
-                "reason": f"Sensor Alert: Temperature readings out of normal range ({alert['threshold_min']}-{alert['threshold_max']}°C) for {alert['duration_hours']}+ hours. Current: {alert['current_value']}°C. Sensor may be broken or lost connectivity. Check hardware.",
+                "reason": alert.get('message',
+                    f"⚠️ Temperature sensor out of range for {alert['duration_hours']}+ hours. "
+                    f"Current: {alert['current_value']}°C (Expected: {alert['threshold_min']}-{alert['threshold_max']}°C). "
+                    f"Check sensor placement and calibration."
+                ),
                 "affected_by": "sensor_health"
             })
 
