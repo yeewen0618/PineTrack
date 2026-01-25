@@ -331,7 +331,7 @@ def generate_schedule_for_plot(
 ):
     logger.info("Generating schedule for plot_id=%s", plot_id)
 
-    # 0) Validate plot exists (FK safety)
+    # 0) Validate plot exists (FK safety).
     plot_check = (
         supabase.table("plots")
         .select("id")
@@ -345,7 +345,7 @@ def generate_schedule_for_plot(
             detail=f"plot_id '{plot_id}' not found in plots table. Please use an existing plot id."
         )
 
-    # 1) Load active templates
+    # 1) Load active task templates (defines what tasks to generate).
     templates_res = (
         supabase.table("task_templates")
         .select("id, title, type, description, start_offset_days, end_offset_days, frequency, interval, active")
@@ -366,8 +366,8 @@ def generate_schedule_for_plot(
             }
         raise HTTPException(status_code=400, detail="No active task templates found")
 
-    # 2) If overwrite, delete generated tasks in the horizon window to avoid duplicates
-    #    (keep manual tasks that don't have an original_date marker)
+    # 2) If overwrite, delete generated tasks in the horizon window to avoid duplicates.
+    #    Manual tasks without original_date are preserved.
     if mode == "overwrite":
         end_date = start_date + timedelta(days=horizon_days)
         try:
@@ -381,7 +381,7 @@ def generate_schedule_for_plot(
         except APIError as e:
             raise HTTPException(status_code=400, detail=f"Delete failed: {e}")
 
-    # 3) Build tasks list
+    # 3) Build tasks list from templates + computed dates.
     tasks_to_insert = []
 
     for tpl in templates:
@@ -417,7 +417,8 @@ def generate_schedule_for_plot(
             "tasks_created": 0
         }
 
-    # 3.4) Resolve hormone vs fertiliser conflicts (new + existing tasks)
+    # 3.4) Resolve hormone vs fertiliser conflicts (new + existing tasks).
+    #      This may shift dates and add reasons/metadata to keep tasks safe.
     end_date = start_date + timedelta(days=horizon_days + DEFAULT_HORMONE_BUFFER_DAYS)
     date_from = start_date - timedelta(days=DEFAULT_HORMONE_BUFFER_DAYS)
     existing_tasks = _fetch_plot_tasks_for_conflict_check(plot_id, date_from, end_date)
@@ -460,7 +461,7 @@ def generate_schedule_for_plot(
             update_payload["reschedule_visible"] = task.get("reschedule_visible")
         supabase.table("tasks").update(update_payload).eq("id", task_id).execute()
 
-    # 3.5) Auto-assign workers (round-robin across all active field workers)
+    # 3.5) Auto-assign workers (round-robin across all active field workers).
     active_workers = _fetch_active_workers()
     logger.info("Active workers fetched: %s", len(active_workers))
     logger.info(
@@ -490,11 +491,11 @@ def generate_schedule_for_plot(
             selected["id"],
         )
 
-    # 4) Remove conflict-only metadata before insert
+    # 4) Remove conflict-only metadata before insert (DB schema may not include it).
     for task in tasks_to_insert:
         task.pop("buffer_days", None)
 
-    # 5) Insert
+    # 5) Insert generated tasks into DB.
     try:
         insert_res = supabase.table("tasks").insert(tasks_to_insert).execute()
     except APIError as e:
@@ -542,6 +543,7 @@ def evaluate_status_threshold_core(
     temperature_field_used = "temperature" if readings else None
     soil_moisture_field_used = "soil_moisture" if readings else None
 
+    # Helper: load the latest cleaned sensor row (optional plot/device filter).
     def _fetch_latest_cleaned_row(filter_field: str, filter_value: Any) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
         select_fields = (
             "plot_id, device_id, data_added, temperature, soil_moisture, "
@@ -562,6 +564,7 @@ def evaluate_status_threshold_core(
             )
             return None, str(exc)
 
+    # If caller doesn't provide readings, derive the latest cleaned values from DB.
     if not readings:
         cleaned_row = None
         selection_reason = None
@@ -617,6 +620,7 @@ def evaluate_status_threshold_core(
         else:
             logger.warning("WARNING: No sensor data found for plot_id=%s device_id=%s", plot_id, device_id)
 
+    # Normalize reading values to floats (or None if missing).
     soil_moisture_val = readings.get("soil_moisture")
     temperature_val = readings.get("temperature")
 
@@ -627,6 +631,7 @@ def evaluate_status_threshold_core(
         float(temperature_val) if temperature_val is not None else None
     )
 
+    # Select thresholds: payload > DB profile > defaults.
     thresholds_used: Dict[str, float] = {}
     thresholds_source = "default"
     threshold_profile_name = None
@@ -685,7 +690,7 @@ def evaluate_status_threshold_core(
         temp_exceeded,
     )
 
-    # 1) Load tasks for that plot + date
+    # 1) Load tasks for the plot + target date.
     tasks_res = (
         supabase.table("tasks")
         .select("id, title, type, task_date, status, reason, original_date, proposed_date")
@@ -700,6 +705,7 @@ def evaluate_status_threshold_core(
         target_date.isoformat(),
         len(tasks),
     )
+    # If no tasks, return early with context (and sensor/threshold metadata).
     if not tasks:
         weather_forecast = []
         try:
@@ -734,6 +740,7 @@ def evaluate_status_threshold_core(
             "per_task_debug": [],
         }
 
+    # If no usable readings were found, skip evaluation but return metadata.
     if temperature_val is None and soil_moisture_val is None:
         return {
             "ok": True,
@@ -760,6 +767,7 @@ def evaluate_status_threshold_core(
             "per_task_debug": [],
         }
 
+    # Prepare per-task updates and debug metadata.
     updates = []
     per_task_debug: List[Dict[str, Any]] = []
 
@@ -773,7 +781,7 @@ def evaluate_status_threshold_core(
     weather_calendar = build_daily_rain_calendar(normalize_weather_df(weather_forecast))
     rain_today, rain_next_3d = _get_rain_metrics(weather_calendar, target_date)
 
-    # 2) Example threshold-based rules (expand later)
+    # 2) Apply threshold-based rules (soil moisture, temperature, rain).
     moisture_max = thresholds_used.get("soil_moisture_max")
     moisture_field_max = thresholds_used.get("soil_moisture_field_max")
     temperature_min = thresholds_used.get("temperature_min")
@@ -783,6 +791,7 @@ def evaluate_status_threshold_core(
 
     stop_buffer = 10.0
 
+    # 3) Evaluate each task and decide Proceed/Pending/Stop + proposed date.
     for t in tasks:
         previous_status = (t.get("status") or "").strip()
         debug_notes: List[str] = []
@@ -916,6 +925,7 @@ def evaluate_status_threshold_core(
                 new_proposed_date = proposed_date.isoformat()
                 new_reason = f"Pending: {reason_detail}. Rescheduled to {new_proposed_date}."
 
+        # If pending with a proposed date, adjust for conflict rules if needed.
         if new_status == "Pending" and new_proposed_date:
             adjusted_date, adjusted_reason, adjusted_status = _adjust_proposed_date_for_conflict(
                 plot_id,
@@ -939,6 +949,7 @@ def evaluate_status_threshold_core(
             "rain_next_3d": rain_next_3d,
             "task_type": str(t.get("type") or "").lower(),
         }
+        # AI gating: only escalates to Pending/Stop (never downgrades).
         ai_label, ai_conf = predict_ai_status(features)
 
         if new_status == "Proceed":
@@ -959,7 +970,7 @@ def evaluate_status_threshold_core(
                 new_reason = _merge_reason(new_reason, ai_reason)
                 decision_reasons.append(ai_reason)
 
-        # Save update if changed
+        # Save update if status/proposed_date/reason changed.
         logger.info(
             "Task %s decision=%s proposed_date=%s",
             t.get("id"),
@@ -987,7 +998,7 @@ def evaluate_status_threshold_core(
         if should_update:
             updates.append((t["id"], new_status, new_reason, new_proposed_date))
 
-    # 3) Apply updates to DB
+    # 4) Apply updates to DB (status, reason, proposed_date, metadata).
     updated = 0
     metadata_supported = supports_reschedule_metadata()
     approval_supported = supports_approval_state()
