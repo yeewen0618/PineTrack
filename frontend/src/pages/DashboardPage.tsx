@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Card } from '../components/ui/card';
 import { WeatherCard } from '../components/WeatherCard';
 import { PlotCard } from '../components/PlotCard';
-import { Sun, CloudSun, CloudRain, Cloud, Calendar, Users, AlertTriangle } from 'lucide-react';
+import { Sun, CloudSun, CloudRain, Cloud, Calendar, Users, AlertTriangle, Info } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 
@@ -307,6 +307,15 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     [plotsWithProgress.length, tasks, todayStr, workers.length, rescheduleActionCount],
   );
 
+  const statusLegend = useMemo(
+    () => [
+      { label: 'Proceed', colorClass: 'bg-[var(--status-proceed)]' },
+      { label: 'Pending', colorClass: 'bg-[var(--status-pending)]' },
+      { label: 'Stop', colorClass: 'bg-[var(--status-stop)]' },
+    ],
+    [],
+  );
+
   return (
     <div className="space-y-6">
       {/* Welcome Header */}
@@ -381,8 +390,25 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Farm Overview - Plots */}
         <Card className="lg:col-span-2 p-6 rounded-2xl bg-white">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-[#111827]">All Plots</h3>
+          <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+            <div>
+              <h3 className="text-[#111827]">All Plots</h3>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[#6B7280]">
+                <div className="flex items-center gap-2">
+                  <Info size={14} className="text-[#94A3B8]" />
+                  <span>Status Legend:</span>
+                </div>
+                {statusLegend.map((item) => (
+                  <span key={item.label} className="inline-flex items-center gap-2 text-[#111827]">
+                    <span
+                      className={`h-3 w-3 rounded-[4px] ${item.colorClass}`}
+                      aria-hidden="true"
+                    />
+                    {item.label}
+                  </span>
+                ))}
+              </div>
+            </div>
             <Button
               variant="outline"
               size="sm"
