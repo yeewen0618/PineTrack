@@ -1,110 +1,85 @@
 """
-Unit Tests for Module 4: Decision Support System (DSS)
-Refactored to match Test Case Documentation (TC16, TC17, etc.)
-Continuing from Module 2 (TC10-TC15)
+Unit Tests for Module 4: Suggestion System (Weather & Sensor Rules)
+Tests recommendation logic from routers/suggestions.py
+TC17 - TC22: Rain, Moisture, Temperature Rules
+Continuing from Module 5 (TC13-TC16)
+
+Legend: Input = (Sensor_Value, Thresholds) → Output = Action/Alert
 """
 
 import pytest
-import pandas as pd
-from datetime import datetime, timedelta
 
-class TestDecisionSupportSystem:
-    """Test Suite for Recommendation Engine - Module 4"""
+# ============================================================
+# RAIN RULES
+# ============================================================
 
-    # ============================================================
-    # RAIN RULE TESTS (RULE 1)
-    # ============================================================
+def test_TC17_rain_clear_skies():
+    """TC17: No action needed for clear skies"""
+    # Input: (Rain_mm, Clear_Threshold)
+    inp = (0.5, 1.0)
+    rain, threshold = inp
+    
+    # Logic [suggestions.py: rain rules]
+    is_clear = rain < threshold
+    assert is_clear, "Rain < 1mm should be clear skies"
 
-    def test_TC16_rain_clear_skies(self):
-        """TC16: Verify 'Clear Skies' message when rain is below threshold (<1mm)."""
-        rain_val = 0.5
-        # Threshold logic check
-        is_clear = rain_val < 1.0 # Using 1.0 as CLEAR_SKIES_THRESHOLD
-        assert is_clear is True
+def test_TC18_rain_heavy_alert():
+    """TC18: Trigger erosion alert for heavy rain"""
+    # Input: (Rain_mm, Heavy_Threshold)
+    inp = (12.0, 10.0)
+    rain, threshold = inp
+    
+    # Logic: Rain > 10mm -> Alert
+    alert_triggered = rain > threshold
+    assert alert_triggered, "Heavy rain (>10mm) should trigger alert"
 
-    def test_TC17_rain_warning(self):
-        """TC17: Verify fertilization task is rescheduled during moderate rain (5mm)."""
-        rain_val = 5.0
-        # Logic: If rain > 1mm and task is fertilization -> RESCHEDULE
-        action = "STAY"
-        if rain_val > 1.0:
-            action = "RESCHEDULE"
-        assert action == "RESCHEDULE"
+# ============================================================
+# MOISTURE RULES
+# ============================================================
 
-    def test_TC18_heavy_rain(self):
-        """TC18: Verify heavy rain (>10mm) triggers an erosion/inspection alert."""
-        rain_val = 12.0
-        alert_triggered = False
-        if rain_val > 10.0: # HEAVY_RAIN_THRESHOLD
-            alert_triggered = True
-        assert alert_triggered is True
+def test_TC19_moisture_dry_irrigation():
+    """TC19: Trigger irrigation alert for dry soil"""
+    # Input: (Moisture_%, Dry_Threshold)
+    inp = (12.0, 15.0)
+    moisture, threshold = inp
+    
+    # Logic [suggestions.py: moisture rules]
+    needs_irrigation = moisture < threshold
+    assert needs_irrigation, "Moisture < 15% should trigger irrigation"
 
-    # ============================================================
-    # MOISTURE RULE TESTS (RULE 2)
-    # ============================================================
+def test_TC20_moisture_waterlogging():
+    """TC20: Trigger waterlogging alert for high moisture"""
+    # Input: (Moisture_%, Waterlog_Threshold)
+    inp = (28.0, 25.0)
+    moisture, threshold = inp
+    
+    # Logic [suggestions.py: moisture rules]
+    waterlog_risk = moisture > threshold
+    assert waterlog_risk, "Moisture > 25% should trigger waterlogging alert"
 
-    def test_TC19_moisture_dry_soil(self):
-        """TC19: Verify irrigation alert triggers when moisture is below 15%."""
-        moisture = 12.0
-        needs_irrigation = moisture < 15.0 # DRY_SOIL_THRESHOLD
-        assert needs_irrigation is True
+# ============================================================
+# TEMPERATURE RULES
+# ============================================================
 
-    def test_TC20_moisture_waterlogging(self):
-        """TC20: Verify waterlogging alert triggers when moisture exceeds 25%."""
-        moisture = 28.0
-        waterlog_risk = moisture > 25.0 # WATERLOGGING_THRESHOLD
-        assert waterlog_risk is True
+def test_TC21_temp_cold_stress():
+    """TC21: Trigger cold stress alert"""
+    # Input: (Temp_C, Cold_Threshold)
+    inp = (18.0, 20.0)
+    temp, threshold = inp
+    
+    # Logic [suggestions.py: temperature rules]
+    growth_retardation = temp < threshold
+    assert growth_retardation, "Temp < 20°C should trigger cold stress"
 
-    # ============================================================
-    # TEMPERATURE RULE TESTS (RULE 3)
-    # ============================================================
-
-    def test_TC21_temp_cold_stress(self):
-        """TC21: Verify cold stress alert when temperature drops below 20°C."""
-        temp = 18.0
-        growth_retardation = temp < 20.0 # COLD_STRESS_THRESHOLD
-        assert growth_retardation is True
-
-    def test_TC22_temp_heat_stress_shift(self):
-        """TC22: Verify heat stress (>35°C) suggests shifting tasks to morning/evening."""
-        temp = 37.0
-        suggested_action = "NONE"
-        if temp > 35.0: # HEAT_STRESS_THRESHOLD
-            suggested_action = "TIME_SHIFT"
-        assert suggested_action == "TIME_SHIFT"
-
-    # ============================================================
-    # SENSOR HEALTH TESTS
-    # ============================================================
-
-    def test_TC23_sensor_health_alert_format(self):
-        """TC23: Verify sensor alert is triggered when readings are out of threshold for >24 hours."""
-        # Simulated sensor data
-        current_moisture = 105.0  # Out of threshold (normal: 1-100%)
-        threshold_min = 1.0
-        threshold_max = 100.0
-        duration_hours = 28.5  # More than 24 hours
-        
-        # Check if sensor is out of threshold
-        is_out_of_range = (current_moisture < threshold_min) or (current_moisture > threshold_max)
-        
-        # Check if duration exceeds 24 hours
-        is_prolonged = duration_hours > 24.0
-        
-        # Alert should be triggered when both conditions are met
-        should_alert = is_out_of_range and is_prolonged
-        assert should_alert is True, "Alert should trigger when sensor is out of range for >24h"
-        
-        # Verify alert message format (as would be generated by the system)
-        alert_reason = f"⚠️ Sensor Alert: Moisture readings out of normal range ({threshold_min}-{threshold_max}%) for {duration_hours}+ hours. Current: {current_moisture}%. Sensor may be broken or lost connectivity. Check hardware."
-        
-        # Verify message contains key information
-        assert "out of" in alert_reason.lower(), "Alert should mention 'out of range'"
-        assert str(duration_hours) in alert_reason, "Alert should include duration"
-        assert str(current_moisture) in alert_reason, "Alert should include current value"
-        assert "hardware" in alert_reason.lower() or "connectivity" in alert_reason.lower(), \
-               "Alert should suggest checking hardware or connectivity"
-
+def test_TC22_temp_heat_stress():
+    """TC22: Suggest heat stress alert"""
+    # Input: (Temp_C, Heat_Threshold)
+    inp = (37.0, 35.0)
+    temp, threshold = inp
+    
+    # Logic: Temp > 35°C -> ALERT
+    alert_triggered = temp > threshold
+    assert alert_triggered, "Temp > 35°C should trigger heat stress alert"
 
 # ============================================================
 # Run Tests

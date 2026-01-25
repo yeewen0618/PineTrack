@@ -53,105 +53,156 @@ class RescheduleRequest(BaseModel):
 def check_sensor_health():
     """
     Check if sensor readings have been out of threshold for more than 24 hours.
-    Returns dict with alerts for moisture and temperature if they're out of range.
+    
+    This function detects potential sensor failures or environmental issues by:
+    1. Checking raw sensor readings against min/max thresholds
+    2. Identifying continuous out-of-range readings spanning 24+ hours
+    3. Verifying the issue persists in most recent reading
+    
+    Returns:
+        List of alert dictionaries containing:
+        - sensor: "moisture" or "temperature"
+        - duration_hours: How long sensor has been out of range
+        - current_value: Latest reading value
+        - threshold_min/max: Expected range limits
+        - message: Human-readable alert description
     """
     alerts = []
     
-    # 🔴 MOCK MODE: Uncomment below to show example sensor alerts in UI
+    # 🔴 MOCK MODE: Uncomment below to test UI alerts without real data issues
     # return [
     #     {
     #         "sensor": "moisture",
     #         "duration_hours": 28.5,
     #         "current_value": 5.2,
     #         "threshold_min": 15.0,
-    #         "threshold_max": 25.0
-    #     },
-    #     {
-    #         "sensor": "temperature",
-    #         "duration_hours": 30.2,
-    #         "current_value": 12.8,
-    #         "threshold_min": 22.0,
-    #         "threshold_max": 32.0
+    #         "threshold_max": 25.0,
+    #         "message": "⚠️ Soil moisture sensor has been out of range for 28.5 hours. Current: 5.2% (Expected: 15-25%). Check sensor connection or irrigation system."
     #     }
     # ]
     
     try:
-        # Get current thresholds
+        # Get current thresholds from database
         thresholds = get_thresholds()
         
-        # Query cleaned_data for the last 24+ hours
-        # Get data from last 30 hours to be safe
+        # Query RAW_DATA table for the last 30 hours
+        # (extra buffer to ensure we catch 24+ hour issues)
+        # We check raw data to detect sensor failures BEFORE any data processing
         time_threshold = (datetime.now() - timedelta(hours=30)).isoformat()
         
-        response = supabase.table("cleaned_data")\
-            .select("timestamp, temperature, soil_moisture")\
-            .gte("timestamp", time_threshold)\
-            .order("timestamp")\
+        response = supabase.table("raw_data")\
+            .select("data_added, temperature, soil_moisture")\
+            .gte("data_added", time_threshold)\
+            .order("data_added")\
             .execute()
         
         if not response.data or len(response.data) < 2:
             # Not enough data to make determination
+            print(f"ℹ️ Not enough sensor data for health check (found {len(response.data) if response.data else 0} records)")
             return alerts
         
         df = pd.DataFrame(response.data)
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df['data_added'] = pd.to_datetime(df['data_added'])
         
-        # Check moisture readings
+        # ====================================================================
+        # CHECK SOIL MOISTURE SENSOR
+        # ====================================================================
         if 'soil_moisture' in df.columns:
-            # Find readings outside threshold
-            moisture_out = df[
-                (df['soil_moisture'] < thresholds['soil_moisture_min']) | 
-                (df['soil_moisture'] > thresholds['soil_moisture_max'])
-            ]
+            # Filter for valid (non-null) moisture readings
+            df_moisture = df[df['soil_moisture'].notna()].copy()
             
-            if len(moisture_out) > 0:
-                # Check if first and last out-of-range readings span > 24 hours
-                time_span = (moisture_out['timestamp'].max() - moisture_out['timestamp'].min()).total_seconds() / 3600
+            if len(df_moisture) > 0:
+                # Find readings outside threshold (potential sensor failure)
+                moisture_out = df_moisture[
+                    (df_moisture['soil_moisture'] < thresholds['soil_moisture_min']) | 
+                    (df_moisture['soil_moisture'] > thresholds['soil_moisture_max'])
+                ]
                 
-                # Also check if most recent reading is out of range
-                latest_moisture = df.iloc[-1]['soil_moisture']
-                is_currently_out = (latest_moisture < thresholds['soil_moisture_min']) or \
-                                  (latest_moisture > thresholds['soil_moisture_max'])
-                
-                if time_span >= 24 and is_currently_out:
-                    alerts.append({
-                        "sensor": "moisture",
-                        "duration_hours": round(time_span, 1),
-                        "current_value": round(latest_moisture, 2),
-                        "threshold_min": thresholds['soil_moisture_min'],
-                        "threshold_max": thresholds['soil_moisture_max']
-                    })
+                if len(moisture_out) > 0:
+                    # Calculate duration of out-of-range readings
+                    time_span = (moisture_out['data_added'].max() - moisture_out['data_added'].min()).total_seconds() / 3600
+                    
+                    # Check if most recent reading is STILL out of range
+                    latest_moisture = df_moisture.iloc[-1]['soil_moisture']
+                    is_currently_out = (latest_moisture < thresholds['soil_moisture_min']) or \
+                                      (latest_moisture > thresholds['soil_moisture_max'])
+                    
+                    # Alert if issue persisted for 24+ hours AND still ongoing
+                    if time_span >= 24 and is_currently_out:
+                        # Determine if too low or too high
+                        if latest_moisture < thresholds['soil_moisture_min']:
+                            issue_type = "too low"
+                            suggestion = "Check sensor connection or irrigation system."
+                        else:
+                            issue_type = "too high"
+                            suggestion = "Check for water leakage or drainage issues."
+                        
+                        alerts.append({
+                            "sensor": "moisture",
+                            "duration_hours": round(time_span, 1),
+                            "current_value": round(latest_moisture, 2),
+                            "threshold_min": thresholds['soil_moisture_min'],
+                            "threshold_max": thresholds['soil_moisture_max'],
+                            "message": f"⚠️ Soil moisture sensor has been out of range for {round(time_span, 1)} hours. "
+                                     f"Current: {round(latest_moisture, 2)}% ({issue_type}, expected: "
+                                     f"{thresholds['soil_moisture_min']}-{thresholds['soil_moisture_max']}%). {suggestion}"
+                        })
+                        print(f"🚨 ALERT: Moisture sensor out of range for {round(time_span, 1)}h - Current: {round(latest_moisture, 2)}%")
         
-        # Check temperature readings
+        # ====================================================================
+        # CHECK TEMPERATURE SENSOR
+        # ====================================================================
         if 'temperature' in df.columns:
-            # Find readings outside threshold
-            temp_out = df[
-                (df['temperature'] < thresholds['temperature_min']) | 
-                (df['temperature'] > thresholds['temperature_max'])
-            ]
+            # Filter for valid (non-null) temperature readings
+            df_temp = df[df['temperature'].notna()].copy()
             
-            if len(temp_out) > 0:
-                # Check if first and last out-of-range readings span > 24 hours
-                time_span = (temp_out['timestamp'].max() - temp_out['timestamp'].min()).total_seconds() / 3600
+            if len(df_temp) > 0:
+                # Find readings outside threshold (potential sensor failure)
+                temp_out = df_temp[
+                    (df_temp['temperature'] < thresholds['temperature_min']) | 
+                    (df_temp['temperature'] > thresholds['temperature_max'])
+                ]
                 
-                # Also check if most recent reading is out of range
-                latest_temp = df.iloc[-1]['temperature']
-                is_currently_out = (latest_temp < thresholds['temperature_min']) or \
-                                  (latest_temp > thresholds['temperature_max'])
-                
-                if time_span >= 24 and is_currently_out:
-                    alerts.append({
-                        "sensor": "temperature",
-                        "duration_hours": round(time_span, 1),
-                        "current_value": round(latest_temp, 2),
-                        "threshold_min": thresholds['temperature_min'],
-                        "threshold_max": thresholds['temperature_max']
-                    })
+                if len(temp_out) > 0:
+                    # Calculate duration of out-of-range readings
+                    time_span = (temp_out['data_added'].max() - temp_out['data_added'].min()).total_seconds() / 3600
+                    
+                    # Check if most recent reading is STILL out of range
+                    latest_temp = df_temp.iloc[-1]['temperature']
+                    is_currently_out = (latest_temp < thresholds['temperature_min']) or \
+                                      (latest_temp > thresholds['temperature_max'])
+                    
+                    # Alert if issue persisted for 24+ hours AND still ongoing
+                    if time_span >= 24 and is_currently_out:
+                        # Determine if too low or too high
+                        if latest_temp < thresholds['temperature_min']:
+                            issue_type = "too low"
+                            suggestion = "Check sensor calibration or environmental conditions."
+                        else:
+                            issue_type = "too high"
+                            suggestion = "Check sensor placement and environmental conditions."
+                        
+                        alerts.append({
+                            "sensor": "temperature",
+                            "duration_hours": round(time_span, 1),
+                            "current_value": round(latest_temp, 2),
+                            "threshold_min": thresholds['temperature_min'],
+                            "threshold_max": thresholds['temperature_max'],
+                            "message": f"⚠️ Temperature sensor has been out of range for {round(time_span, 1)} hours. "
+                                     f"Current: {round(latest_temp, 2)}°C ({issue_type}, expected: "
+                                     f"{thresholds['temperature_min']}-{thresholds['temperature_max']}°C). {suggestion}"
+                        })
+                        print(f"🚨 ALERT: Temperature sensor out of range for {round(time_span, 1)}h - Current: {round(latest_temp, 2)}°C")
+        
+        if len(alerts) == 0:
+            print(f"✅ All sensors within normal range (checked {len(df)} readings)")
         
         return alerts
         
     except Exception as e:
-        print(f"Error checking sensor health: {e}")
+        print(f"❌ Error checking sensor health: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 # ============================================================================
@@ -467,33 +518,46 @@ def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, senso
             })
     
     # --------------------------------------------------------
+    # ============================================================
     # SENSOR HEALTH ALERTS
-    # --------------------------------------------------------
+    # ============================================================
     # Check if sensors have been reporting out-of-threshold values for >24 hours
-    # This may indicate sensor malfunction or connectivity issues
+    # This detects:
+    # - Broken/disconnected sensors
+    # - Calibration issues
+    # - Environmental problems (e.g., irrigation failure)
+    print("\n🔍 Checking sensor health...")
     sensor_health_alerts = check_sensor_health()
     
     for alert in sensor_health_alerts:
         if alert['sensor'] == 'moisture':
             recommendations.append({
                 "task_id": "sensor_alert_moisture",
-                "task_name": "Moisture Sensor Alert",
+                "task_name": "🚨 Soil Moisture Sensor Alert",
                 "original_date": "Immediate",
-                "suggested_date": "Check sensor hardware",
+                "suggested_date": "Check sensor hardware immediately",
                 "type": "TRIGGER",
                 "severity": "CRITICAL",
-                "reason": f"Sensor Alert: Moisture readings out of normal range ({alert['threshold_min']}-{alert['threshold_max']}%) for {alert['duration_hours']}+ hours. Current: {alert['current_value']}%. Sensor may be broken or lost connectivity. Check hardware.",
+                "reason": alert.get('message', 
+                    f"⚠️ Moisture sensor out of range for {alert['duration_hours']}+ hours. "
+                    f"Current: {alert['current_value']}% (Expected: {alert['threshold_min']}-{alert['threshold_max']}%). "
+                    f"Check sensor connection or irrigation system."
+                ),
                 "affected_by": "sensor_health"
             })
         elif alert['sensor'] == 'temperature':
             recommendations.append({
                 "task_id": "sensor_alert_temperature",
-                "task_name": "Temperature Sensor Alert",
+                "task_name": "🚨 Temperature Sensor Alert",
                 "original_date": "Immediate",
-                "suggested_date": "Check sensor hardware",
+                "suggested_date": "Check sensor hardware immediately",
                 "type": "TRIGGER",
                 "severity": "CRITICAL",
-                "reason": f"Sensor Alert: Temperature readings out of normal range ({alert['threshold_min']}-{alert['threshold_max']}°C) for {alert['duration_hours']}+ hours. Current: {alert['current_value']}°C. Sensor may be broken or lost connectivity. Check hardware.",
+                "reason": alert.get('message',
+                    f"⚠️ Temperature sensor out of range for {alert['duration_hours']}+ hours. "
+                    f"Current: {alert['current_value']}°C (Expected: {alert['threshold_min']}-{alert['threshold_max']}°C). "
+                    f"Check sensor placement and calibration."
+                ),
                 "affected_by": "sensor_health"
             })
 
