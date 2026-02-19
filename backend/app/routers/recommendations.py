@@ -18,8 +18,8 @@ from app.services.task_eval_threshold_service import get_task_eval_thresholds_pa
 # API Router Configuration
 # ============================================================================
 router = APIRouter(
-    prefix="/suggestions",
-    tags=["suggestions"]
+    prefix="/recommendations",
+    tags=["recommendations"]
 )
 
 # ============================================================================
@@ -50,7 +50,7 @@ class RescheduleRequest(BaseModel):
 # Helper Functions
 # ============================================================================
 
-def check_sensor_health(plot_id: Optional[str] = None):
+def sensor_alert():
     """
     Check if sensor readings have been out of threshold for more than 24 hours.
     
@@ -527,7 +527,7 @@ def generate_insight_recommendations(scheduled_tasks, weather_forecast_df, senso
     # - Calibration issues
     # - Environmental problems (e.g., irrigation failure)
     print("\n🔍 Checking sensor health...")
-    sensor_health_alerts = check_sensor_health()
+    sensor_health_alerts = sensor_alert()
     
     for alert in sensor_health_alerts:
         if alert['sensor'] == 'moisture':

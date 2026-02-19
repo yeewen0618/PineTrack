@@ -8,8 +8,8 @@ from app.core.supabase_client import supabase
 logger = logging.getLogger(__name__)
 
 _SENSOR_FIELDS_BASE = (
-    "device_id, data_added, temperature, soil_moisture, "
-    "cleaned_temperature, cleaned_soil_moisture"
+    "device_id, data_added, temperature, soil_moisture, nitrogen, "
+    "cleaned_temperature, cleaned_soil_moisture, cleaned_nitrogen"
 )
 _SENSOR_FIELDS_WITH_PROCESSED = f"{_SENSOR_FIELDS_BASE}, processed_at"
 
@@ -67,4 +67,7 @@ def build_latest_sensor_reading(device_id: int) -> Optional[Dict[str, Any]]:
         "soil_moisture": row.get("cleaned_soil_moisture")
         if row.get("cleaned_soil_moisture") is not None
         else row.get("soil_moisture"),
+        "nitrogen": row.get("cleaned_nitrogen")
+        if row.get("cleaned_nitrogen") is not None
+        else row.get("nitrogen"),
     }

@@ -1,6 +1,6 @@
 """
 Unit Tests for Module 4: Suggestion System (Weather & Sensor Rules)
-Tests recommendation logic from routers/suggestions.py
+Tests recommendation logic from routers/recommendations.py
 TC17 - TC22: Rain, Moisture, Temperature Rules
 Continuing from Module 5 (TC13-TC16)
 
@@ -43,7 +43,7 @@ def test_TC19_moisture_dry_irrigation():
     inp = (12.0, 15.0)
     moisture, threshold = inp
     
-    # Logic [suggestions.py: moisture rules]
+    # Logic [recommendations.py: moisture rules]
     needs_irrigation = moisture < threshold
     assert needs_irrigation, "Moisture < 15% should trigger irrigation"
 
@@ -53,7 +53,7 @@ def test_TC20_moisture_waterlogging():
     inp = (28.0, 25.0)
     moisture, threshold = inp
     
-    # Logic [suggestions.py: moisture rules]
+    # Logic [recommendations.py: moisture rules]
     waterlog_risk = moisture > threshold
     assert waterlog_risk, "Moisture > 25% should trigger waterlogging alert"
 

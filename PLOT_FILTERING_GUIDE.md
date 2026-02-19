@@ -83,10 +83,10 @@ GROUP BY plot_id;
 Open browser and test these URLs:
 
 ```
-http://localhost:5001/analytics/history?days=30
-http://localhost:5001/analytics/history?days=30&plot_id=A1
-http://localhost:5001/analytics/forecast?days=7
-http://localhost:5001/analytics/forecast?days=7&plot_id=A1
+http://localhost:8000/analytics/history?days=30
+http://localhost:8000/analytics/history?days=30&plot_id=A1
+http://localhost:8000/analytics/forecast?days=7
+http://localhost:8000/analytics/forecast?days=7&plot_id=A1
 ```
 
 **Expected Result**: Both URLs work, filtered version should only return Plot A1 data

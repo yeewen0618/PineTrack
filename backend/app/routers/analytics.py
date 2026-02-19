@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from app.core.supabase_client import supabase
 from app.forecasting import generate_forecasts
-from app.weather_service import fetch_weather_data, fetch_dashboard_weather
+from app.weather_api import get_weather_data, fetch_dashboard_weather
 from typing import List, Optional
 import time
 
@@ -26,7 +26,7 @@ def get_weather_analytics():
     Fetch historical and forecast weather data from Open-Meteo.
     """
     try:
-        return fetch_weather_data()
+        return get_weather_data()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

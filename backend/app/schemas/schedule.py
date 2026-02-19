@@ -15,4 +15,3 @@ class EvaluateThresholdStatusRequest(BaseModel):
     thresholds: Optional[Dict[str, float]] = None      # e.g. {"soil_moisture_max": 70}
     reschedule_days: int = 2
     sensor_plot_id: Optional[int] = None  # Optional: specify which plot's sensor data to use
-    device_id: Optional[int] = None  # Optional: specify sensor device id to use

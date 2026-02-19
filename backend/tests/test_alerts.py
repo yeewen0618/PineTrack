@@ -1,6 +1,6 @@
 """
 Unit Tests for Module 5: Sensor Alert System
-Tests sensor health monitoring from routers/suggestions.py
+Tests sensor health monitoring from routers/recommendations.py
 TC13 - TC16: Alert Detection and Validation
 Continuing from Module 2 (TC09-TC12)
 
@@ -47,7 +47,7 @@ def test_TC15_alert_requires_current_out():
     inp = (20.0, 30.0, 15.0, 25.0)  # Current is NOW normal
     current_val, past_duration, min_th, max_th = inp
     
-    # Alert Logic [suggestions.py: lines 122-125]
+    # Alert Logic [recommendations.py: lines 122-125]
     is_currently_out = (current_val < min_th) or (current_val > max_th)
     should_alert = past_duration > 24 and is_currently_out
     
@@ -63,7 +63,7 @@ def test_TC16_alert_message_moisture_low():
     inp = (5.2, 28.5, 15.0, 25.0)
     current_val, duration, min_th, max_th = inp
     
-    # Message Logic [suggestions.py: lines 131-143]
+    # Message Logic [recommendations.py: lines 131-143]
     issue_type = "too low" if current_val < min_th else "too high"
     suggestion = "Check sensor connection or irrigation system."
     

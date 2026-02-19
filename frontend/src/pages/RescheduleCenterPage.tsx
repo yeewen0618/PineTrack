@@ -139,15 +139,6 @@ export function RescheduleCenterPage() {
     })();
   }, []);
 
-  useEffect(() => {
-    const handler = () => {
-      loadData();
-      loadInsights();
-    };
-    window.addEventListener("tasks:refresh", handler);
-    return () => window.removeEventListener("tasks:refresh", handler);
-  }, []);
-
   const handleApprove = async (taskId: string) => {
     try {
       await approveReschedule(taskId);

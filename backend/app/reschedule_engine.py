@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from app.ai_inference import predict_delay_days
-from app.routers.suggestions import generate_insight_recommendations
+from app.routers.recommendations import generate_insight_recommendations
 from app.services.task_eval_threshold_service import get_task_eval_thresholds_payload, TASK_EVAL_DEFAULTS
 
 logger = logging.getLogger(__name__)

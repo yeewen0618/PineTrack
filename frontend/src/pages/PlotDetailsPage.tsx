@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, Navigate } from "react-router-dom";
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -16,9 +16,8 @@ import {
   TooltipTrigger
 } from '../components/ui/tooltip';
 import { GraphSection } from '../components/analytics/GraphSection';
-import { PlotDates } from '../components/PlotDates';
-import { getPlotDetails, getPlotTaskSummary, listTasks } from "../lib/api";
-import type { PlotDetails, Task } from "../lib/api";
+import { getPlotById, listTasks } from "../lib/api";
+import type { Plot, Task } from "../lib/api";
 import { calcHarvestProgressPercent } from '../lib/progress';
 
 type PlotDetailsPageProps = {
@@ -50,9 +49,8 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
     });
 
   // DB-backed
-  const [plot, setPlot] = useState<PlotDetails | null>(null);
+  const [plot, setPlot] = useState<Plot | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [summaryTasks, setSummaryTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   // mock-backed
   const [newObservation, setNewObservation] = useState('');
@@ -62,64 +60,34 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
     return mockObservations.filter((o) => o.plotId === id);
   }, [id]);
 
-  const buildLatestTasks = useCallback(
-    (allTasks: Task[], limit: number) => {
-      const withDates = allTasks.filter((t) => t.task_date);
-      const upcoming = withDates
-        .filter((t) => parseDateString(t.task_date) >= startOfToday)
-        .sort((a, b) => parseDateString(a.task_date).getTime() - parseDateString(b.task_date).getTime());
-      if (upcoming.length > 0) return upcoming.slice(0, limit);
-
-      const recent = withDates
-        .filter((t) => parseDateString(t.task_date) < startOfToday)
-        .sort((a, b) => parseDateString(b.task_date).getTime() - parseDateString(a.task_date).getTime());
-      return recent.slice(0, limit);
-    },
-    [startOfToday],
-  );
-
-  const loadPlotDetails = useCallback(async () => {
-    if (!id) return;
-    setLoading(true);
-    try {
-      const [plotData, tasksRes, summaryRes] = await Promise.all([
-        getPlotDetails(id),
-        listTasks({ plot_id: id }),
-        getPlotTaskSummary(id, 5),
-      ]);
-
-      setPlot(plotData);
-      const taskData = tasksRes.data ?? [];
-      setTasks(taskData);
-
-      const summaryList = summaryRes.tasks ?? [];
-      setSummaryTasks(summaryList.length > 0 ? summaryList : buildLatestTasks(taskData, 5));
-
-      // keep context
-      sessionStorage.setItem("last_plot_id", id);
-    } catch (e) {
-      const error = e as { message?: string };
-      toast.error(error?.message ?? "Failed to load plot details");
-      setPlot(null);
-      setTasks([]);
-      setSummaryTasks([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [id, buildLatestTasks]);
-
   useEffect(() => {
     if (!id) return;
-    loadPlotDetails();
-  }, [id, loadPlotDetails]);
 
-  useEffect(() => {
-    const handler = () => {
-      loadPlotDetails();
+    const load = async () => {
+      setLoading(true);
+      try {
+        // ✅ Use the helper function from api.ts
+        const plotData = await getPlotById(id);
+        setPlot(plotData);
+
+        // ✅ Tasks from DB (plot filtered)
+        const tasksRes = await listTasks({ plot_id: id });
+        setTasks(tasksRes.data ?? []);
+
+        // keep context
+        sessionStorage.setItem("last_plot_id", id);
+      } catch (e) {
+        const error = e as { message?: string };
+        toast.error(error?.message ?? "Failed to load plot details");
+        setPlot(null);
+        setTasks([]);
+      } finally {
+        setLoading(false);
+      }
     };
-    window.addEventListener("tasks:refresh", handler);
-    return () => window.removeEventListener("tasks:refresh", handler);
-  }, [loadPlotDetails]);
+
+    load();
+  }, [id]);
 
   // If user somehow lands here without plotId, send them back
   if (!plotId) return <Navigate to="/plots" replace />;
@@ -129,7 +97,7 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
   if (!plot) return <div>Plot not found</div>;
 
   // ✅ consistent progress from DB planting_date
-  const progress = calcHarvestProgressPercent(plot.start_planting_date ?? plot.planting_date);
+  const progress = calcHarvestProgressPercent(plot.planting_date);
 
   // ✅ normalize tasks to the format your UI expects
   // If your UI expects fields lTask `date` + `status`, map here.
@@ -207,7 +175,7 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
             <p className="text-[18px] text-[#374151]">{plot.crop_type}</p>
           </div>
         </div>
-        <StatusBadge status={plot.plot_status ?? plot.status} />
+        <StatusBadge status={plot.status} />
       </div>
 
       {/* Plot Summary Card */}
@@ -218,13 +186,10 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
             <p className="text-[20px] font-medium text-[#111827]">{plot.area_ha} hectares</p>
           </div>
           <div>
-            <p className="text-[15px] text-[#6B7280] mb-1">Dates</p>
-            <PlotDates
-              variant="light"
-              startPlantingDate={plot.start_planting_date ?? plot.planting_date}
-              harvestDate={plot.expected_harvest_date}
-              className="mt-1"
-            />
+            <p className="text-[15px] text-[#6B7280] mb-1">Planting Date</p>
+            <p className="text-[20px] font-medium text-[#111827]">
+              {new Date(plot.planting_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </p>
           </div>
           <div>
             <p className="text-[15px] text-[#6B7280] mb-1">Progress</p>
@@ -349,19 +314,16 @@ export function PlotDetailsPage({ onNavigate }: PlotDetailsPageProps) {
           <Card className="p-6 rounded-2xl bg-white shadow-sm">
             <h3 className="text-[18px] text-[#111827] mb-4">Scheduled Tasks</h3>
             <div className="space-y-3">
-              {summaryTasks.map((task) => (
+              {uiTasks.slice(0, 5).map((task) => (
                 <div key={task.id} className="p-3 bg-[#F9FAFB] rounded-xl">
                   <div className="flex items-start justify-between mb-2">
                     <p className="text-[14px] text-[#111827]">{task.title}</p>
-                    <StatusBadge status={task.decision} size="sm" />
+                    <StatusBadge status={task.status} size="sm" />
                   </div>
-                  <p className="text-[14px] text-[#6B7280] mb-1">{new Date(task.task_date).toLocaleDateString()}</p>
+                  <p className="text-[14px] text-[#6B7280] mb-1">{new Date(task.date).toLocaleDateString()}</p>
                   <p className="text-[14px] text-[#6B7280]">Worker: {task.assigned_worker_name ?? 'Unassigned'}</p>
                 </div>
               ))}
-              {summaryTasks.length === 0 && (
-                <p className="text-[14px] text-[#6B7280] text-center py-4">No scheduled tasks</p>
-              )}
             </div>
           </Card>
 

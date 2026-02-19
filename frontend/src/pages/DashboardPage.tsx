@@ -4,16 +4,17 @@ import { Link } from 'react-router-dom';
 import { Card } from '../components/ui/card';
 import { WeatherCard } from '../components/WeatherCard';
 import { PlotCard } from '../components/PlotCard';
-import { Sun, CloudSun, CloudRain, Cloud, Calendar, Users, AlertTriangle, Info } from 'lucide-react';
+import { Sun, CloudSun, CloudRain, Cloud, Calendar, Users, AlertTriangle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 
 import { calcHarvestProgressPercent } from '../lib/progress';
 import { sortPlotsById } from '../lib/sortPlots';
+import { getPlotStatusFromTasks } from '../lib/plotStatus';
 import { InsightRecommendationsCard } from '../components/insights/InsightRecommendationsCard';
 
 // ✅ Use real API
-import { getDashboardStats, getDashboardWeather, getAnalyticsHistory, getPendingRescheduleApprovals, getWeatherAnalytics, getWeatherRescheduleSuggestions, getPlotStatusWindow, listPlotSummaries } from '../lib/api';
+import { getDashboardStats, getDashboardWeather, getAnalyticsHistory, getPendingRescheduleApprovals, getWeatherAnalytics, getWeatherRescheduleSuggestions } from '../lib/api';
 import type { Plot, Task, Worker } from '../lib/api';
 
 // Weather types (aligned with backend response)
@@ -91,10 +92,10 @@ function StatCard({ label, value, icon, to }: StatCardProps) {
 
 export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const [plots, setPlots] = useState<Plot[]>([]);
+  const [rawTasks, setRawTasks] = useState<Task[]>([]);
   const [tasks, setTasks] = useState<TaskVM[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [pendingRescheduleApprovals, setPendingRescheduleApprovals] = useState<Task[]>([]);
-  const [plotSummaries, setPlotSummaries] = useState<Map<string, Task["decision"]>>(new Map());
   const [weather, setWeather] = useState<CurrentWeather | null>(null);
   const [forecast, setForecast] = useState<ForecastDay[]>([]);
   const [weatherSuggestions, setWeatherSuggestions] = useState<Suggestion[]>([]);
@@ -113,21 +114,15 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     setLoading(true);
     try {
       // 1) Load dashboard data (same endpoints as destination pages)
-      const window = getPlotStatusWindow();
-      const [dashboardData, pendingApprovals, summariesRes] = await Promise.all([
+      const [dashboardData, pendingApprovals] = await Promise.all([
         getDashboardStats(),
         getPendingRescheduleApprovals(),
-        listPlotSummaries(window),
       ]);
       const plotsData = sortPlotsById(dashboardData.plots ?? []);
       setPlots(plotsData);
+      setRawTasks(dashboardData.tasks ?? []);
       setWorkers(dashboardData.workers ?? []);
       setPendingRescheduleApprovals(pendingApprovals);
-      const summaryMap = new Map<string, Task["decision"]>();
-      for (const summary of summariesRes.data ?? []) {
-        summaryMap.set(summary.plot_id, summary.plot_status);
-      }
-      setPlotSummaries(summaryMap);
 
       // 2) Load tasks (all tasks)
       const tasksData = dashboardData.tasks ?? [];
@@ -237,11 +232,27 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const plotsWithProgress = useMemo(() => {
     return (plots ?? []).map((p) => ({
       plot: p,
-      progressPercent: calcHarvestProgressPercent(p.start_planting_date ?? p.planting_date),
+      progressPercent: calcHarvestProgressPercent(p.planting_date),
     }));
   }, [plots]);
 
-  const plotStatusById = useMemo(() => plotSummaries, [plotSummaries]);
+  const plotStatusById = useMemo(() => {
+    const tasksByPlot = new Map<string, Task[]>();
+    for (const task of rawTasks) {
+      const plotId = String(task.plot_id ?? "").trim();
+      if (!plotId) continue;
+      const bucket = tasksByPlot.get(plotId) ?? [];
+      bucket.push(task);
+      tasksByPlot.set(plotId, bucket);
+    }
+
+    const map = new Map<string, Task["decision"]>();
+    for (const plot of plots) {
+      const plotTasks = tasksByPlot.get(plot.id) ?? [];
+      map.set(plot.id, getPlotStatusFromTasks(plotTasks));
+    }
+    return map;
+  }, [plots, rawTasks]);
 
   const upcomingTasks = useMemo(() => {
     return tasks.filter((t) => {
@@ -305,15 +316,6 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
       },
     ],
     [plotsWithProgress.length, tasks, todayStr, workers.length, rescheduleActionCount],
-  );
-
-  const statusLegend = useMemo(
-    () => [
-      { label: 'Proceed', colorClass: 'bg-[var(--status-proceed)]' },
-      { label: 'Pending', colorClass: 'bg-[var(--status-pending)]' },
-      { label: 'Stop', colorClass: 'bg-[var(--status-stop)]' },
-    ],
-    [],
   );
 
   return (
@@ -390,25 +392,8 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Farm Overview - Plots */}
         <Card className="lg:col-span-2 p-6 rounded-2xl bg-white">
-          <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
-            <div>
-              <h3 className="text-[#111827]">All Plots</h3>
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[#6B7280]">
-                <div className="flex items-center gap-2">
-                  <Info size={14} className="text-[#94A3B8]" />
-                  <span>Status Legend:</span>
-                </div>
-                {statusLegend.map((item) => (
-                  <span key={item.label} className="inline-flex items-center gap-2 text-[#111827]">
-                    <span
-                      className={`h-3 w-3 rounded-[4px] ${item.colorClass}`}
-                      aria-hidden="true"
-                    />
-                    {item.label}
-                  </span>
-                ))}
-              </div>
-            </div>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-[#111827]">All Plots</h3>
             <Button
               variant="outline"
               size="sm"

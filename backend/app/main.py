@@ -26,7 +26,7 @@ from app.routers.workers import router as workers_router
 from app.routers import schedule
 from app.routers import plots
 from app.routers import tasks
-from app.routers import suggestions
+from app.routers import recommendations
 from app.routers import config
 from app.routers import users
 from app.routers import task_eval_thresholds
@@ -112,7 +112,7 @@ app.include_router(workers_router)
 app.include_router(schedule.router)
 app.include_router(plots.router)
 app.include_router(tasks.router)
-app.include_router(suggestions.router)
+app.include_router(recommendations.router)
 app.include_router(users.router)
 
 @app.on_event("startup")

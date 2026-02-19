@@ -1,10 +1,10 @@
-// ---------- Suggestions ----------
+// ---------- Recommendations ----------
 export async function getWeatherRescheduleSuggestions(
   tasks: Task[], 
   weatherForecast: Record<string, unknown>[], 
   sensorSummary?: { avg_moisture: number; avg_temp: number }
 ) {
-  const res = await fetch(`${API_BASE}/suggestions/weather-reschedule`, {
+  const res = await fetch(`${API_BASE}/recommendations/weather-reschedule`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ 
@@ -79,29 +79,6 @@ export async function deletePlot(plotId: string) {
 // ---------- Types ----------
 export type PlotStatus = "Proceed" | "Pending" | "Stop";
 
-export type PlotSummary = {
-  plot_id: string;
-  plot_name: string;
-  plot_status: PlotStatus;
-  task_counts: {
-    proceed: number;
-    pending: number;
-    stopped: number;
-    total: number;
-  };
-  pending_approvals_count: number;
-};
-
-export const DEFAULT_PLOT_STATUS_WINDOW_DAYS = 7;
-
-export function getPlotStatusWindow(days: number = DEFAULT_PLOT_STATUS_WINDOW_DAYS, baseDate: Date = new Date()) {
-  const dateFrom = baseDate.toISOString().slice(0, 10);
-  const end = new Date(baseDate);
-  end.setDate(end.getDate() + days);
-  const dateTo = end.toISOString().slice(0, 10);
-  return { date_from: dateFrom, date_to: dateTo };
-}
-
 // Helper interfaces for raw backend responses to avoid 'any'
 interface RawBackendPlot extends Partial<Plot> {
     plot_id?: string | number;
@@ -116,8 +93,6 @@ export type Plot = {
   id: string;
   name: string;
   planting_date: string; // YYYY-MM-DD recommended
-  start_planting_date?: string | null;
-  expected_harvest_date?: string | null;
   location_x: number | null; // grid-based position
   location_y: number | null; // grid-based position
   status: PlotStatus;
@@ -127,10 +102,6 @@ export type Plot = {
   area_ha?: number | null;
   crop_type?: string | null;
   growth_stage?: string | null;
-};
-
-export type PlotDetails = Plot & {
-  plot_status?: PlotStatus;
 };
 
 export type Task = {
@@ -178,13 +149,6 @@ function normalizeWorker(worker: Worker): Worker {
   } as Worker;
 }
 
-function normalizeTask(raw: RawBackendTask): Task {
-  return {
-    ...raw,
-    decision: raw.status as PlotStatus,
-  } as Task;
-}
-
 // ---------- Plots ----------
 export async function listPlots() {
   const res = await apiFetch<{ ok: true; data: RawBackendPlot[] }>("/api/plots");
@@ -197,23 +161,6 @@ export async function listPlots() {
   });
 
   return { ...res, data: normalized };
-}
-
-export async function listPlotSummaries(params?: {
-  date_from?: string;
-  date_to?: string;
-  window_days?: number;
-}) {
-  const query = new URLSearchParams();
-  if (params?.date_from) query.set("date_from", params.date_from);
-  if (params?.date_to) query.set("date_to", params.date_to);
-  if (typeof params?.window_days === "number") {
-    query.set("window_days", String(params.window_days));
-  }
-  const suffix = query.toString() ? `?${query.toString()}` : "";
-  return apiFetch<{ ok: true; date_from: string; date_to: string; data: PlotSummary[] }>(
-    `/api/plots/summary${suffix}`,
-  );
 }
 
 export async function createPlotWithPlan(payload: {
@@ -261,19 +208,6 @@ export async function getPlotById(plotId: string): Promise<Plot> {
   return plot;
 }
 
-export async function getPlotDetails(plotId: string): Promise<PlotDetails> {
-  const res = await apiFetch<{ ok: true; data: RawBackendPlot; plot_status?: PlotStatus }>(
-    `/api/plots/${encodeURIComponent(plotId)}/details`,
-  );
-  const rawPlot = res.data ?? {};
-  const rawId = rawPlot?.id ?? rawPlot?.plot_id;
-  return {
-    ...(rawPlot as Plot),
-    id: rawId == null ? "" : String(rawId),
-    plot_status: res.plot_status,
-  };
-}
-
 // ---------- Tasks ----------
 export async function listTasks(params?: { plot_id?: string }) {
   const query = params?.plot_id ? `?plot_id=${encodeURIComponent(params.plot_id)}` : "";
@@ -281,7 +215,10 @@ export async function listTasks(params?: { plot_id?: string }) {
 
   return {
     ...res,
-    data: res.data.map((t) => normalizeTask(t)),
+    data: res.data.map((t) => ({
+      ...t,
+      decision: t.status as PlotStatus, // ✅ standard mapping
+    })),
   } as { ok: true; data: Task[] };
 }
 
@@ -289,37 +226,6 @@ export async function listTasks(params?: { plot_id?: string }) {
 export async function getTasksByPlotId(plotId: string): Promise<Task[]> {
   const res = await listTasks({ plot_id: plotId });
   return res.data;
-}
-
-export async function getPlotTaskSummary(plotId: string, limit: number = 5) {
-  const query = new URLSearchParams({
-    scope: "summary",
-    limit: String(limit),
-  });
-  const res = await apiFetch<{
-    ok: true;
-    plot_id: string;
-    today: string;
-    upcoming_tasks: RawBackendTask[];
-    recent_tasks: RawBackendTask[];
-    tasks: RawBackendTask[];
-    limit: number;
-  }>(`/api/plots/${encodeURIComponent(plotId)}/tasks?${query.toString()}`);
-
-  return {
-    ...res,
-    upcoming_tasks: (res.upcoming_tasks ?? []).map((t) => normalizeTask(t)),
-    recent_tasks: (res.recent_tasks ?? []).map((t) => normalizeTask(t)),
-    tasks: (res.tasks ?? []).map((t) => normalizeTask(t)),
-  } as {
-    ok: true;
-    plot_id: string;
-    today: string;
-    upcoming_tasks: Task[];
-    recent_tasks: Task[];
-    tasks: Task[];
-    limit: number;
-  };
 }
 
 export async function updateTaskAssignment(payload: {
@@ -340,7 +246,10 @@ export async function updateTaskAssignment(payload: {
 
   return {
     ...res,
-    data: normalizeTask(res.data),
+    data: {
+      ...res.data,
+      decision: res.data.status as PlotStatus,
+    } as Task,
   };
 }
 
@@ -429,7 +338,10 @@ export async function listRescheduleProposals() {
 
   return {
     ...res,
-    data: res.data.map((t) => normalizeTask(t)),
+    data: res.data.map((t) => ({
+      ...t,
+      decision: t.status as PlotStatus,
+    })),
   } as { ok: true; data: Task[] };
 }
 
@@ -459,7 +371,10 @@ export async function approveReschedule(taskId: string) {
 
   return {
     ...res,
-    data: normalizeTask(res.data),
+    data: {
+      ...res.data,
+      decision: res.data.status as PlotStatus,
+    } as Task,
   } as { ok: true; data: Task };
 }
 
@@ -470,7 +385,10 @@ export async function rejectReschedule(taskId: string) {
 
   return {
     ...res,
-    data: normalizeTask(res.data),
+    data: {
+      ...res.data,
+      decision: res.data.status as PlotStatus,
+    } as Task,
   } as { ok: true; data: Task };
 }
 
@@ -573,7 +491,6 @@ export type EvaluateStatusThresholdPayload = {
   plot_id: string;
   date: string;
   device_id?: number;
-  sensor_plot_id?: number;
   reschedule_days?: number;
   thresholds?: Record<string, number>;
   readings?: Record<string, number>;
@@ -583,9 +500,7 @@ export type EvaluateStatusThresholdResponse = {
   message: string;
   plot_id: string;
   date: string;
-  updated?: number;
-  tasks_updated?: number;
-  tasks_evaluated?: number;
+  updated: number;
   reading_device_id?: number | null;
   reading_timestamp?: string | null;
 };
@@ -643,13 +558,8 @@ export async function updateTaskEvalThresholds(data: TaskEvalThresholdUpdate) {
 }
 
 export async function evaluateStatusThreshold(payload: EvaluateStatusThresholdPayload) {
-  const res = await apiFetch<EvaluateStatusThresholdResponse>("/api/schedule/evaluate-status-threshold", {
+  return apiFetch<EvaluateStatusThresholdResponse>("/api/schedule/evaluate-status-threshold", {
     method: "POST",
     body: JSON.stringify(payload),
   });
-  const normalizedUpdated = typeof res.updated === "number" ? res.updated : res.tasks_updated ?? 0;
-  return {
-    ...res,
-    updated: normalizedUpdated,
-  };
 }

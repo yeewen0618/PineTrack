@@ -1,57 +1,21 @@
-import os
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
-from requests.adapters import HTTPAdapter
-from requests.exceptions import SSLError
-from urllib3.util.retry import Retry
 
 # Location: 2.814896155234285, 102.28537805149125
 LAT = 2.8149
 LON = 102.2854
 
-_SESSION = None
-
-
-def _get_session() -> requests.Session:
-    global _SESSION
-    if _SESSION is not None:
-        return _SESSION
-    session = requests.Session()
-    retry = Retry(
-        total=3,
-        backoff_factor=0.5,
-        status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=("GET",),
-        raise_on_status=False,
-    )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    _SESSION = session
-    return session
-
-
-def _fetch_open_meteo(url: str, params: dict) -> dict:
-    session = _get_session()
-    timeout = 10
-    insecure = os.getenv("OPEN_METEO_INSECURE", "").lower() in ("1", "true", "yes")
-
-    try:
-        response = session.get(url, params=params, timeout=timeout, verify=not insecure)
-        response.raise_for_status()
-        return response.json()
-    except SSLError as exc:
-        if insecure:
-            raise
-        print(f"Weather API SSL error, retrying without verification: {exc}")
-        response = session.get(url, params=params, timeout=timeout, verify=False)
-        response.raise_for_status()
-        return response.json()
-
-def fetch_weather_data(past_days=20, forecast_days=7):
+def get_weather_data(past_days=20, forecast_days=7):
     """
-    Fetches historical and forecast weather data from Open-Meteo.
+    Retrieves both historical and forecast weather data from Open-Meteo API.
+    
+    Args:
+        past_days (int): Number of historical days to fetch (default: 20)
+        forecast_days (int): Number of forecast days to fetch (default: 7)
+    
+    Returns:
+        list: Weather data with 'type' field ("Historical" or "Forecast")
     """
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
@@ -64,7 +28,9 @@ def fetch_weather_data(past_days=20, forecast_days=7):
     }
     
     try:
-        data = _fetch_open_meteo(url, params)
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
         
         # Process into a list of dicts
         hourly = data.get("hourly", {})
@@ -131,7 +97,9 @@ def fetch_dashboard_weather():
     }
     
     try:
-        data = _fetch_open_meteo(url, params)
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
         
         # 1. Process Current Weather
         current = data.get("current", {})
